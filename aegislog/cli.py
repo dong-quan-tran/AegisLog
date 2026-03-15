@@ -1,6 +1,6 @@
 import argparse
 
-from aegislog.parsing.access import parse_access_file
+from aegislog.parsing.apache_error import parse_error_file
 from aegislog.features.sessions import build_sessions
 from aegislog.ml.pipeline import score_sessions
 
@@ -12,7 +12,7 @@ def cmd_train(args: argparse.Namespace) -> None:
     train_main()
 
 def cmd_analyze(args: argparse.Namespace) -> None:
-    events = parse_access_file(args.log_path)
+    events = parse_error_file(args.log_path)
     sessions = build_sessions(events)
     df = score_sessions(sessions, model_path=args.model_path)
 

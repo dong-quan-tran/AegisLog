@@ -2,7 +2,7 @@ import argparse
 import joblib
 from pathlib import Path
 
-from aegislog.parsing.access import parse_access_file
+from aegislog.parsing.apache_error import parse_error_file
 from aegislog.features.sessions import build_sessions
 from aegislog.features.behavioral import sessions_to_features
 from aegislog.ml.pipeline import build_pipeline
@@ -13,7 +13,7 @@ def main():
     parser.add_argument("--model-path", default="models/log_anomaly_iforest.joblib")
     args = parser.parse_args()
 
-    events = parse_access_file(args.logs_path)
+    events = parse_error_file(args.logs_path)
     sessions = build_sessions(events)
     df = sessions_to_features(sessions)
 
