@@ -1,0 +1,3 @@
+# Large raw datasets not tracked in git
+data/loghub/SSH.log
+data/loghub/*.zip
