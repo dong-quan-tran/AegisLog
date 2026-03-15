@@ -1,15 +1,44 @@
 # AegisLog
 
-AegisLog is an AI-powered log anomaly and triage assistant. It ingests authentication and web access logs, builds per-session and per-IP behavioral features, and uses unsupervised models (Isolation Forest) plus semantic analysis to flag anomalous behavior. On top of detection, AegisLog groups anomalies into incidents and generates short, human-readable explanations to help reduce triage time.
+AegisLog is an AI‑powered log analysis and triage service focused on authentication and web access logs. Instead of doing classic supervised classification like SentinelTI, AegisLog uses unsupervised anomaly detection, clustering, and AI explanations to help engineers quickly understand and respond to unusual behavior in their systems.
+
+It lives at the intersection of AI, software engineering, and cybersecurity:
+
+AI: anomaly detection, clustering, semantic log understanding, LLM explanations.
+
+Software engineering: robust pipelines, CLI & API, SQLite tracking, performance for large batches.
+
+Cybersecurity flavor: emphasis on auth attacks, recon/scans, and misconfigurations that have security impact.
 
 ## Features
 
-- Ingests raw auth and access logs (Apache/Nginx-style and JSON app logs).
-- Builds per-session and per-IP behavioral features (failed logins, duration, status code patterns, night-time activity, etc.).
-- Uses unsupervised anomaly detection (Isolation Forest) to score sessions and IPs without labeled training data.
-- Clusters anomalies into higher-level incidents to avoid alert floods.
-- Optional AI explainer module that summarizes incidents in natural language (e.g., “Probable credential stuffing from a single IP”).
-- Exposes both a CLI and a FastAPI HTTP API for batch analysis.
+- **Log ingestion and normalization**  
+  Ingests raw authentication and web access logs from files or HTTP requests and normalizes them into a consistent event schema (timestamp, IP, user, path, status, user agent, raw text, etc.).
+
+- **Session and IP behavior modeling**  
+  Groups individual log events into sessions (user/IP/user‑agent over time) and per‑IP windows, then computes rich behavioral features such as request counts, session duration, failed vs successful login ratios, status code patterns, unique endpoints touched, and after‑hours activity.
+
+- **Unsupervised anomaly detection**  
+  Uses unsupervised models (Isolation Forest) trained on mostly normal behavior to assign anomaly scores to each session/IP without needing labeled attack data, and maps scores into risk levels (low/medium/high).
+
+- **Incident clustering instead of alert floods**  
+  Clusters related anomalous sessions into higher‑level incidents using behavioral features and optional semantic embeddings of log messages, so you review a handful of incidents instead of thousands of isolated anomalies.
+
+- **LLM‑powered explanations and categories**  
+  For each incident, an AI explainer generates short, human‑readable summaries (e.g., “Likely credential stuffing from a single IP”) and proposes a category label such as `auth_attack`, `scanner`, `misconfiguration`, or `app_error`.
+
+- **Security‑flavored behavior detection**  
+  Focuses on patterns that matter for security and reliability, including password spraying, credential stuffing, brute‑force login attempts, reconnaissance/scanning of many endpoints, and sudden error spikes on sensitive paths.
+
+- **Triage workflow and feedback loop**  
+  Stores incidents, anomaly scores, and explanations in SQLite, and lets analysts mark incidents as “true incident” or “benign,” enabling threshold tuning and simple learning from past triage decisions.
+
+- **Developer‑friendly CLI and HTTP API**  
+  Provides a CLI to initialize the database, train models, and analyze log files, plus a FastAPI HTTP API with endpoints for per‑session anomaly detection and incident‑level analysis, suitable for integration into dev, SRE, or SecOps workflows.
+
+- **Experiment tracking and evaluation**  
+  Tracks model versions, feature configurations, and evaluation metrics in SQLite so you can compare different anomaly models and feature sets on small labeled benchmarks in a reproducible way.
+
 
 ## Tech stack
 
