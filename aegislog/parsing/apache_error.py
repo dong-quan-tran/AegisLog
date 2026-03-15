@@ -1,3 +1,5 @@
+# aegislog/parsing/apache_error.py
+
 import re
 from datetime import datetime
 from typing import List
@@ -19,12 +21,10 @@ def parse_error_line(line: str) -> LogEvent | None:
     m = LOG_PATTERN.match(line)
     if not m:
         return None
-    ts_str = m.group("time")
-    ts = datetime.strptime(ts_str, TIME_FORMAT)
 
-    # For error logs, we often don't have IP/user/path/status directly.
-    # We'll treat the whole message as "path" or "user_agent"-like text.
-    message = m.group("message")
+    ts_str = m.group("time")
+    level = m.group("level")  # e.g. "notice" or "error"
+    ts = datetime.strptime(ts_str, TIME_FORMAT)
 
     return LogEvent(
         timestamp=ts,
@@ -33,7 +33,7 @@ def parse_error_line(line: str) -> LogEvent | None:
         method=None,
         path=None,
         status=None,
-        user_agent=None,
+        user_agent=level,  # temporary: stash level here
         raw=line,
         source="apache_error",
     )
