@@ -17,7 +17,11 @@ NUMERIC_FEATURES = [
     "status_4xx",
     "status_5xx",
     "error_ratio",
+    "error_events",
+    "notice_events",
+    "error_event_ratio",
 ]
+
 
 def build_pipeline(contamination: float = 0.05) -> Pipeline:
     pre = ColumnTransformer(
