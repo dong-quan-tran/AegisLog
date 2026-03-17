@@ -4,11 +4,9 @@ AegisLog is an AI‑powered log analysis and triage service focused on authentic
 
 It lives at the intersection of AI, software engineering, and cybersecurity:
 
-AI: anomaly detection, clustering, semantic log understanding, LLM explanations.
-
-Software engineering: robust pipelines, CLI & API, SQLite tracking, performance for large batches.
-
-Cybersecurity flavor: emphasis on auth attacks, recon/scans, and misconfigurations that have security impact.
+- **AI**: anomaly detection, clustering, semantic log understanding, LLM explanations.
+- **Software engineering**: robust pipelines, CLI & API, SQLite tracking, performance for large batches.
+- **Cybersecurity flavor**: emphasis on auth attacks, recon/scans, and misconfigurations that have security impact.
 
 ## Features
 
@@ -24,21 +22,20 @@ Cybersecurity flavor: emphasis on auth attacks, recon/scans, and misconfiguratio
 - **Incident clustering instead of alert floods**  
   Clusters related anomalous sessions into higher‑level incidents using behavioral features and optional semantic embeddings of log messages, so you review a handful of incidents instead of thousands of isolated anomalies.
 
-- **LLM‑powered explanations and categories**  
-  For each incident, an AI explainer generates short, human‑readable summaries (e.g., “Likely credential stuffing from a single IP”) and proposes a category label such as `auth_attack`, `scanner`, `misconfiguration`, or `app_error`.
+- **LLM‑powered explanations and categories** *(planned)*  
+  For each incident, an AI explainer will generate short, human‑readable summaries (e.g., “Likely credential stuffing from a single IP”) and propose a category label such as `auth_attack`, `scanner`, `misconfiguration`, or `app_error`.
 
 - **Security‑flavored behavior detection**  
   Focuses on patterns that matter for security and reliability, including password spraying, credential stuffing, brute‑force login attempts, reconnaissance/scanning of many endpoints, and sudden error spikes on sensitive paths.
 
-- **Triage workflow and feedback loop**  
-  Stores incidents, anomaly scores, and explanations in SQLite, and lets analysts mark incidents as “true incident” or “benign,” enabling threshold tuning and simple learning from past triage decisions.
+- **Triage workflow and feedback loop** *(planned)*  
+  Will store incidents, anomaly scores, and explanations in SQLite, and let analysts mark incidents as “true incident” or “benign,” enabling threshold tuning and simple learning from past triage decisions.
 
 - **Developer‑friendly CLI and HTTP API**  
-  Provides a CLI to initialize the database, train models, and analyze log files, plus a FastAPI HTTP API with endpoints for per‑session anomaly detection and incident‑level analysis, suitable for integration into dev, SRE, or SecOps workflows.
+  Provides a CLI to train models and analyze log files today, and a FastAPI HTTP API is planned for per‑session anomaly detection and incident‑level analysis, suitable for integration into dev, SRE, or SecOps workflows.
 
-- **Experiment tracking and evaluation**  
-  Tracks model versions, feature configurations, and evaluation metrics in SQLite so you can compare different anomaly models and feature sets on small labeled benchmarks in a reproducible way.
-
+- **Experiment tracking and evaluation** *(planned)*  
+  Will track model versions, feature configurations, and evaluation metrics in SQLite so you can compare different anomaly models and feature sets on small labeled benchmarks in a reproducible way.
 
 ## Tech stack
 
@@ -54,84 +51,122 @@ Cybersecurity flavor: emphasis on auth attacks, recon/scans, and misconfiguratio
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/<your-username>/AegisLog.git
+git clone https://github.com/dong-quan-tran/AegisLog.git
 cd AegisLog
+```
 
-2. Create and activate a virtual environment
+### 2. Create and activate a virtual environment
+
 On Windows (PowerShell):
 
-powershell
+```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
+```
+
 On Windows (cmd):
 
-text
+```cmd
 python -m venv .venv
 .\.venv\Scripts\activate.bat
+```
+
 On Linux/macOS:
 
-bash
+```bash
 python -m venv .venv
 source .venv/bin/activate
-3. Install dependencies
-bash
+```
+
+### 3. Install dependencies
+
+```bash
 pip install --upgrade pip
 pip install -r requirements.txt
-(You’ll add requirements.txt soon.)
+```
 
-4. Run the CLI (dev placeholder)
-bash
+### 4. Run the CLI
+
+```bash
 python -m aegislog.cli --help
-5. Run the API (dev placeholder)
-bash
+```
+
+### 5. Run the API (dev placeholder)
+
+```bash
 uvicorn aegislog.api:app --host 0.0.0.0 --port 8080 --reload
-CLI (planned)
-AegisLog will provide commands for training and detection:
+```
 
-Initialize experiment DB:
+## CLI (current and planned)
 
-bash
-python -m aegislog.cli init
-Train anomaly model on logs:
+Current commands:
 
-bash
-python -m aegislog.cli train --logs-path data/train_logs
-Analyze a log file and print top incidents (human-readable):
+- Analyze a log file and print top anomalous sessions (human-readable):
 
-bash
-python -m aegislog.cli analyze logs/access.log
-Output incidents as JSON for integration:
+  ```bash
+  python -m aegislog.cli analyze data/loghub/Apache.log --log-type apache_error
+  python -m aegislog.cli analyze data/loghub/SSH.log --log-type ssh_auth
+  ```
 
-bash
-python -m aegislog.cli analyze logs/access.log --json-pretty
-HTTP API (planned)
-GET /health – Basic health check.
+Planned CLI additions:
 
-POST /detect-sessions – Scores sessions/IPs and returns anomaly scores.
+- Initialize experiment DB:
 
-POST /detect-incidents – Runs detection, clustering, and explanation to produce incidents.
+  ```bash
+  python -m aegislog.cli init
+  ```
 
-Authentication: future versions will support an API key via X-API-KEY.
+- Train anomaly model on logs:
 
-How it works (high level)
-Parse logs
-Raw auth/access logs are parsed into a normalized event schema (timestamp, IP, user, path, status, user-agent, etc.).
+  ```bash
+  python -m aegislog.cli train --logs-path data/train_logs
+  ```
 
-Build behavioral features
-Events are grouped into sessions and per-IP windows, and features like event count, duration, failed login ratio, status code pattern, and night-time activity are computed.
+- Output incidents as JSON for integration:
 
-Detect anomalies
-An Isolation Forest model trained on mostly-normal data assigns an anomaly score to each session/IP. Scores are mapped to risk levels.
+  ```bash
+  python -m aegislog.cli analyze logs/access.log --json-pretty
+  ```
 
-Group into incidents
-Anomalous sessions/IPs are clustered into incidents so analysts can review a handful of groups instead of thousands of individual events.
+## HTTP API (planned)
 
-Explain incidents (AI explainer)
-For each incident, AegisLog summarizes key patterns in natural language and suggests likely categories such as credential stuffing, vulnerability scanning, or misconfiguration.
+- `GET /health` – Basic health check.
+- `POST /detect-sessions` – Scores sessions/IPs and returns anomaly scores.
+- `POST /detect-incidents` – Runs detection, clustering, and explanation to produce incidents.
 
-Project status
+Authentication: future versions will support an API key via `X-API-KEY`.
+
+## Datasets
+
+AegisLog is developed and tested using subsets of public research datasets from the Loghub collection (https://github.com/logpai/loghub):
+
+- **Apache error logs** – used to model abnormal web server error behavior over time (e.g., bursts of `[error]` vs `[notice]` events).
+- **SSH authentication logs** – used to model authentication behavior such as repeated failed login attempts from the same IP or across many users.
+
+Only small samples of these datasets are stored in the repository. Larger raw log files (for example, the full Loghub SSH log) are expected to be downloaded locally by the user for training and experimentation.
+
+## How it works (high level)
+
+1. **Parse logs**  
+   Raw auth/access logs are parsed into a normalized event schema (timestamp, IP, user, path, status, user-agent, etc.).
+
+2. **Build behavioral features**  
+   Events are grouped into sessions and per-IP windows, and features like event count, duration, failed login ratio, status code pattern, and night-time activity are computed.
+
+3. **Detect anomalies**  
+   An Isolation Forest model trained on mostly-normal data assigns an anomaly score to each session/IP. Scores are mapped to risk levels.
+
+4. **Group into incidents** *(planned)*  
+   Anomalous sessions/IPs are clustered into incidents so analysts can review a handful of groups instead of thousands of individual events.
+
+5. **Explain incidents (AI explainer)** *(planned)*  
+   For each incident, AegisLog will summarize key patterns in natural language and suggest likely categories such as credential stuffing, vulnerability scanning, or misconfiguration.
+
+## Project status
+
 Early development. CLI/API commands and models are subject to change.
 
-Author
-Name: Dong Quan Tran (Johnny)
+## Author
+
+Name: Dong Quan Tran (Johnny)  
 GitHub: https://github.com/dong-quan-tran
