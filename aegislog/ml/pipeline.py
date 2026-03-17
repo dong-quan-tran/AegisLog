@@ -20,6 +20,9 @@ NUMERIC_FEATURES = [
     "error_events",
     "notice_events",
     "error_event_ratio",
+    "auth_failed",
+    "auth_success",
+    "auth_fail_ratio",
 ]
 
 
