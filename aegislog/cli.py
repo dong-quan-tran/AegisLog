@@ -1,6 +1,7 @@
 import argparse
 
 from aegislog.parsing.apache_error import parse_error_file
+from aegislog.parsing.auth_ssh import parse_ssh_file
 from aegislog.features.sessions import build_sessions
 from aegislog.ml.pipeline import score_sessions
 
@@ -12,7 +13,11 @@ def cmd_train(args: argparse.Namespace) -> None:
     train_main()
 
 def cmd_analyze(args: argparse.Namespace) -> None:
-    events = parse_error_file(args.log_path)
+    if args.log_type == "apache_error":
+        events = parse_error_file(args.log_path)
+    else:
+        events = parse_ssh_file(args.log_path)
+
     sessions = build_sessions(events)
     df = score_sessions(sessions, model_path=args.model_path)
 
@@ -55,6 +60,12 @@ def main() -> None:
         "--model-path",
         default="models/log_anomaly_iforest.joblib",
         help="Path to trained model.",
+    )
+    p_analyze.add_argument(
+        "--log-type",
+        choices=["apache_error", "ssh_auth"],
+        default="apache_error",
+        help="Type of log file to parse.",
     )
     p_analyze.add_argument(
         "--top",
