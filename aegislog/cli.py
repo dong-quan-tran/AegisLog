@@ -33,9 +33,11 @@ def cmd_incidents(args: argparse.Namespace) -> None:
             f"- incident_id={inc.incident_id} ip={inc.ip} "
             f"sessions={len(inc.session_ids)} "
             f"total_events={inc.total_events} "
+            f"auth_failed={inc.auth_failed} auth_success={inc.auth_success} "
+            f"auth_fail_ratio={inc.auth_fail_ratio:.2f} "
             f"avg_anomaly_score={inc.avg_anomaly_score:.3f}"
         )
-        
+
 def cmd_init(args: argparse.Namespace) -> None:
     print("Init placeholder: will set up SQLite experiment DB.")
 
