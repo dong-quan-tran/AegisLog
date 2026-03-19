@@ -13,13 +13,15 @@ class Incident:
     session_ids: List[str]
     total_events: int
     avg_anomaly_score: float
-    
+    auth_failed: int
+    auth_success: int
+    auth_fail_ratio: float
+
 def group_sessions_by_ip(
     sessions: list[Session],
     scores_df: pd.DataFrame,
     min_sessions: int = 1,
 ) -> list[Incident]:
-    # scores_df must have columns: session_id, ip, event_count, anomaly_score
     by_ip: dict[str, list[dict]] = defaultdict(list)
 
     for _, row in scores_df.iterrows():
@@ -31,6 +33,8 @@ def group_sessions_by_ip(
                 "session_id": row["session_id"],
                 "event_count": row["event_count"],
                 "anomaly_score": row["anomaly_score"],
+                "auth_failed": row.get("auth_failed", 0),
+                "auth_success": row.get("auth_success", 0),
             }
         )
 
@@ -38,12 +42,18 @@ def group_sessions_by_ip(
     for idx, (ip, sess_list) in enumerate(by_ip.items()):
         if len(sess_list) < min_sessions:
             continue
+
         total_events = sum(s["event_count"] for s in sess_list)
         avg_score = (
             sum(s["anomaly_score"] for s in sess_list) / len(sess_list)
             if sess_list
             else 0.0
         )
+        total_failed = sum(s["auth_failed"] for s in sess_list)
+        total_success = sum(s["auth_success"] for s in sess_list)
+        auth_total = total_failed + total_success
+        auth_fail_ratio = total_failed / auth_total if auth_total else 0.0
+
         incident_id = f"ip:{ip}#{idx}"
         incidents.append(
             Incident(
@@ -52,9 +62,11 @@ def group_sessions_by_ip(
                 session_ids=[s["session_id"] for s in sess_list],
                 total_events=total_events,
                 avg_anomaly_score=avg_score,
+                auth_failed=total_failed,
+                auth_success=total_success,
+                auth_fail_ratio=auth_fail_ratio,
             )
         )
 
-    # Sort by avg anomaly score descending
     incidents.sort(key=lambda inc: inc.avg_anomaly_score, reverse=True)
     return incidents
