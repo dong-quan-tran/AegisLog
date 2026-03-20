@@ -31,6 +31,7 @@ def cmd_incidents(args: argparse.Namespace) -> None:
     for inc in top:
         print(
             f"- incident_id={inc.incident_id} ip={inc.ip} "
+            f"severity={inc.severity} "
             f"sessions={len(inc.session_ids)} "
             f"total_events={inc.total_events} "
             f"auth_failed={inc.auth_failed} auth_success={inc.auth_success} "
