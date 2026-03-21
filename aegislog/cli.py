@@ -11,6 +11,8 @@ from aegislog.parsing.auth_ssh import parse_ssh_file
 from aegislog.features.sessions import build_sessions
 from aegislog.ml.pipeline import score_sessions
 
+from aegislog.incidents import summarize_incident
+
 def cmd_incidents(args: argparse.Namespace) -> None:
     if args.log_type != "ssh_auth":
         print("Currently, incidents are only implemented for ssh_auth logs.")
@@ -38,6 +40,10 @@ def cmd_incidents(args: argparse.Namespace) -> None:
             f"auth_fail_ratio={inc.auth_fail_ratio:.2f} "
             f"avg_anomaly_score={inc.avg_anomaly_score:.3f}"
         )
+
+        summary = summarize_incident(inc)
+        print(f"  summary_title={summary.title}")
+        print(f"  summary_description={summary.description}")
 
 def cmd_init(args: argparse.Namespace) -> None:
     print("Init placeholder: will set up SQLite experiment DB.")
