@@ -4,14 +4,9 @@ from aegislog.parsing.apache_error import parse_error_file
 from aegislog.parsing.auth_ssh import parse_ssh_file
 from aegislog.features.sessions import build_sessions
 from aegislog.ml.pipeline import score_sessions
+from aegislog.incidents import group_sessions_by_ip, summarize_incident
+from aegislog.ai import build_incident_llm_prompt, explain_incident_with_llm
 
-from aegislog.incidents import group_sessions_by_ip
-
-from aegislog.parsing.auth_ssh import parse_ssh_file
-from aegislog.features.sessions import build_sessions
-from aegislog.ml.pipeline import score_sessions
-
-from aegislog.incidents import summarize_incident
 
 def cmd_incidents(args: argparse.Namespace) -> None:
     if args.log_type != "ssh_auth":
@@ -44,6 +39,14 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         summary = summarize_incident(inc)
         print(f"  summary_title={summary.title}")
         print(f"  summary_description={summary.description}")
+
+        if args.print_llm_prompt:
+            llm_prompt = build_incident_llm_prompt(inc, summary)
+            prompt_text = explain_incident_with_llm(llm_prompt)
+            print("  llm_prompt_begin")
+            for line in prompt_text.splitlines():
+                print(f"    {line}")
+            print("  llm_prompt_end")
 
 def cmd_init(args: argparse.Namespace) -> None:
     print("Init placeholder: will set up SQLite experiment DB.")
@@ -135,6 +138,11 @@ def main() -> None:
         type=int,
         default=5,
         help="Number of top incidents to print.",
+    )
+    p_incidents.add_argument(
+        "--print-llm-prompt",
+        action="store_true",
+        help="For each incident, print a ready-to-send LLM explanation prompt.",
     )
     p_incidents.set_defaults(func=cmd_incidents)
 
