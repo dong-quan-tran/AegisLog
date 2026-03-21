@@ -28,24 +28,30 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
     ip = incident.ip or "unknown"
     title = f"{incident.severity.capitalize()} severity SSH incident from {ip}"
 
-    # Very small heuristic for description wording
     if incident.auth_success > 0 and incident.auth_failed > 0:
         auth_phrase = (
             f"{incident.auth_failed} failed and {incident.auth_success} successful "
             f"SSH authentication attempts"
         )
     elif incident.auth_failed > 0 and incident.auth_success == 0:
-        auth_phrase = f"{incident.auth_failed} failed SSH authentication attempts and no successes"
+        auth_phrase = (
+            f"{incident.auth_failed} failed SSH authentication attempts and no successes"
+        )
     elif incident.auth_success > 0 and incident.auth_failed == 0:
         auth_phrase = f"{incident.auth_success} successful SSH authentication attempts"
     else:
         auth_phrase = "no SSH authentication activity recorded"
+
+    brute_force_hint = ""
+    if incident.auth_failed >= 100 and incident.auth_success == 0 and incident.auth_fail_ratio >= 0.9:
+        brute_force_hint = " This pattern is consistent with SSH brute-force or password-spraying activity."
 
     description = (
         f"IP {ip} generated {incident.total_events} SSH log events across "
         f"{len(incident.session_ids)} session(s), with {auth_phrase}. "
         f"Authentication failure ratio is {incident.auth_fail_ratio:.2f} and the "
         f"average anomaly score is {incident.avg_anomaly_score:.3f}."
+        f"{brute_force_hint}"
     )
 
     return IncidentSummary(
