@@ -27,6 +27,37 @@ class IncidentSummary:
     title: str
     description: str
 
+def recommend_incident_actions(incident: Incident) -> List[str]:
+    actions: List[str] = []
+
+    ip = incident.ip or "unknown"
+
+    # Basic SSH brute-force handling
+    if incident.auth_failed >= 100 and incident.auth_fail_ratio >= 0.9:
+        actions.append(
+            f"Block or rate-limit SSH access from source IP {ip} at the firewall or perimeter."
+        )
+        actions.append(
+            "Review authentication logs for the targeted accounts to confirm no unauthorized access occurred."
+        )
+
+    # If there are any successes, focus on potential compromise
+    if incident.auth_success > 0:
+        actions.append(
+            "Investigate successful SSH logins during this incident window for signs of account compromise."
+        )
+        actions.append(
+            "Reset credentials and enforce multi-factor authentication on affected accounts if possible."
+        )
+
+    # General hardening
+    if not actions:
+        actions.append(
+            "Review SSH configuration and authentication policies to ensure best practices are in place."
+        )
+
+    return actions
+
 def summarize_incident(incident: Incident) -> IncidentSummary:
     ip = incident.ip or "unknown"
     title = f"{incident.severity.capitalize()} severity SSH incident from {ip}"
@@ -65,6 +96,11 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
         f"{time_phrase}"  
     )
 
+    actions = recommend_incident_actions(incident)
+    if actions:
+        actions_text = " Recommended actions: " + "; ".join(actions)
+        description += actions_text
+        
     return IncidentSummary(
         incident_id=incident.incident_id,
         title=title,
