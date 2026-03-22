@@ -5,7 +5,7 @@ from aegislog.parsing.auth_ssh import parse_ssh_file
 from aegislog.features.sessions import build_sessions
 from aegislog.ml.pipeline import score_sessions
 from aegislog.incidents import group_sessions_by_ip, summarize_incident
-from aegislog.ai import build_incident_llm_prompt, explain_incident_with_llm
+from aegislog.ai import build_incident_llm_prompt, explain_incident_with_llm, local_incident_explanation
 
 
 def cmd_incidents(args: argparse.Namespace) -> None:
@@ -47,6 +47,12 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         summary = summarize_incident(inc)
         print(f"  summary_title={summary.title}")
         print(f"  summary_description={summary.description}")
+
+        if args.show_local_explanation:
+            explanation = local_incident_explanation(inc, summary)
+            print("  local_explanation_begin")
+            print(f"    {explanation}")
+            print("  local_explanation_end")
 
         if args.print_llm_prompt:
             llm_prompt = build_incident_llm_prompt(inc, summary)
@@ -134,6 +140,11 @@ def main() -> None:
         "--model-path",
         default="models/log_anomaly_iforest_ssh.joblib",
         help="Path to trained model.",
+    )
+    p_incidents.add_argument(
+        "--show-local-explanation",
+        action="store_true",
+        help="Show a simple, built-in AI-style explanation for each incident.",
     )
     p_incidents.add_argument(
         "--log-type",
