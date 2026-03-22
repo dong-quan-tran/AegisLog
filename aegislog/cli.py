@@ -26,6 +26,14 @@ def cmd_incidents(args: argparse.Namespace) -> None:
 
     print(f"Top {len(top)} IP-based incidents:")
     for inc in top:
+
+        if inc.first_seen and inc.last_seen:
+            time_window = (
+                f"{inc.first_seen.isoformat()}..{inc.last_seen.isoformat()}"
+            )
+        else:
+            time_window = "unknown"
+            
         print(
             f"- incident_id={inc.incident_id} ip={inc.ip} "
             f"severity={inc.severity} "
