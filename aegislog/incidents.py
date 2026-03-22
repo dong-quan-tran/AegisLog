@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import List, Optional
 
 import pandas as pd
@@ -17,6 +18,8 @@ class Incident:
     auth_success: int
     auth_fail_ratio: float
     severity: str  # e.g. "low" | "medium" | "high"
+    first_seen: Optional[datetime]
+    last_seen: Optional[datetime]
 
 @dataclass
 class IncidentSummary:
@@ -46,12 +49,20 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
     if incident.auth_failed >= 100 and incident.auth_success == 0 and incident.auth_fail_ratio >= 0.9:
         brute_force_hint = " This pattern is consistent with SSH brute-force or password-spraying activity."
 
+    if incident.first_seen and incident.last_seen:
+        time_phrase = (
+            f" This activity was observed between "
+            f"{incident.first_seen.isoformat()} and {incident.last_seen.isoformat()}."
+        )
+    else:
+        time_phrase = ""
     description = (
         f"IP {ip} generated {incident.total_events} SSH log events across "
         f"{len(incident.session_ids)} session(s), with {auth_phrase}. "
         f"Authentication failure ratio is {incident.auth_fail_ratio:.2f} and the "
         f"average anomaly score is {incident.avg_anomaly_score:.3f}."
         f"{brute_force_hint}"
+        f"{time_phrase}"  
     )
 
     return IncidentSummary(
@@ -78,6 +89,9 @@ def group_sessions_by_ip(
     min_sessions: int = 1,
 ) -> list[Incident]:
     by_ip: dict[str, list[dict]] = defaultdict(list)
+
+    # Map session_id -> Session for timestamp lookup
+    session_by_id = {s.session_id: s for s in sessions}
 
     for _, row in scores_df.iterrows():
         ip = row["ip"]
@@ -109,6 +123,20 @@ def group_sessions_by_ip(
         auth_total = total_failed + total_success
         auth_fail_ratio = total_failed / auth_total if auth_total else 0.0
 
+        # Collect all timestamps for this IP
+        timestamps: list[datetime] = []
+        for s in sess_list:
+            sess = session_by_id.get(s["session_id"])
+            if not sess:
+                continue
+            for ev in sess.events:
+                ts = getattr(ev, "timestamp", None)
+                if ts is not None:
+                    timestamps.append(ts)
+
+        first_seen = min(timestamps) if timestamps else None
+        last_seen = max(timestamps) if timestamps else None
+
         incident_id = f"ip:{ip}#{idx}"
         
         severity = _compute_severity(avg_score, total_failed, auth_fail_ratio)
@@ -124,6 +152,8 @@ def group_sessions_by_ip(
                 auth_success=total_success,
                 auth_fail_ratio=auth_fail_ratio,
                 severity=severity,
+                first_seen=first_seen,
+                last_seen=last_seen,
             )
         )
 
