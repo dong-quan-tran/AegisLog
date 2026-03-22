@@ -16,13 +16,15 @@ def build_incident_llm_prompt(
     summary: IncidentSummary,
     model: str = "gpt-4.1-mini",
 ) -> LLMIncidentPrompt:
-    """
-    Build a prompt for an LLM to explain an SSH security incident.
-
-    This does not call any external service; it only prepares the prompt text.
-    """
-
     ip = incident.ip or "unknown"
+
+    if incident.first_seen and incident.last_seen:
+        time_lines = (
+            f"- First seen: {incident.first_seen.isoformat()}\n"
+            f"- Last seen: {incident.last_seen.isoformat()}\n"
+        )
+    else:
+        time_lines = ""
 
     prompt = f"""You are a security analyst AI assistant.
 
@@ -39,8 +41,7 @@ Here is structured information about the incident:
 - Successful authentication attempts: {incident.auth_success}
 - Authentication failure ratio: {incident.auth_fail_ratio:.2f}
 - Average anomaly score: {incident.avg_anomaly_score:.3f}
-
-Here is an existing summary of the incident:
+{time_lines}Here is an existing summary of the incident:
 
 Title: {summary.title}
 Description: {summary.description}
