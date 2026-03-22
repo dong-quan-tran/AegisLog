@@ -1,7 +1,6 @@
 from dataclasses import dataclass
-from typing import Optional
 
-from aegislog.incidents import Incident, IncidentSummary
+from aegislog.incidents import Incident, IncidentSummary, recommend_incident_actions
 
 
 @dataclass
@@ -16,6 +15,12 @@ def build_incident_llm_prompt(
     summary: IncidentSummary,
     model: str = "gpt-4.1-mini",
 ) -> LLMIncidentPrompt:
+    """
+    Build a prompt for an LLM to explain an SSH security incident.
+
+    This does not call any external service; it only prepares the prompt text.
+    """
+
     ip = incident.ip or "unknown"
 
     if incident.first_seen and incident.last_seen:
@@ -25,6 +30,13 @@ def build_incident_llm_prompt(
         )
     else:
         time_lines = ""
+
+    actions = recommend_incident_actions(incident)
+    actions_block = ""
+    if actions:
+        actions_block = "Here are preliminary, rule-based recommended actions:\n"
+        for a in actions:
+            actions_block += f"- {a}\n"
 
     prompt = f"""You are a security analyst AI assistant.
 
@@ -41,7 +53,8 @@ Here is structured information about the incident:
 - Successful authentication attempts: {incident.auth_success}
 - Authentication failure ratio: {incident.auth_fail_ratio:.2f}
 - Average anomaly score: {incident.avg_anomaly_score:.3f}
-{time_lines}Here is an existing summary of the incident:
+{time_lines}{actions_block}
+Here is an existing summary of the incident:
 
 Title: {summary.title}
 Description: {summary.description}
