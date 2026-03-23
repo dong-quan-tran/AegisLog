@@ -19,34 +19,34 @@ def local_incident_explanation(
 
     This does not use an LLM; it just formats existing data into a short narrative.
     """
-
     ip = incident.ip or "unknown"
 
-    lines = []
-    lines.append(
-        f"This looks like a {incident.severity} severity SSH incident from {ip} "
+    parts = []
+
+    parts.append(
+        f"This appears to be a {incident.severity} severity SSH incident from {ip}, "
         f"with {incident.auth_failed} failed and {incident.auth_success} successful "
         f"authentication attempts across {len(incident.session_ids)} session(s)."
     )
 
     if incident.first_seen and incident.last_seen:
-        lines.append(
+        parts.append(
             f"The activity occurred between {incident.first_seen.isoformat()} "
             f"and {incident.last_seen.isoformat()}."
         )
 
     if incident.auth_failed >= 100 and incident.auth_fail_ratio >= 0.9:
-        lines.append(
-            "The pattern (high failures, near-zero successes) is consistent with SSH brute-force or password-spraying activity."
+        parts.append(
+            "The pattern of many failures and no successes is consistent with SSH brute-force or password-spraying activity."
         )
 
     actions = recommend_incident_actions(incident)
     if actions:
-        lines.append("Suggested next steps:")
-        for a in actions:
-            lines.append(f"- {a}")
+        parts.append(
+            "Recommended next steps include: " + "; ".join(actions) + "."
+        )
 
-    return " ".join(lines)
+    return " ".join(parts)
 
 
 def build_incident_llm_prompt(
