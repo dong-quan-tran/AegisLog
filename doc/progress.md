@@ -269,30 +269,29 @@
 
 ### SSH session and incident enrichment
 
-- Added SSH authentication statistics to session features, tracking failed and successful authentication attempts per session and exposing them to the anomaly scoring pipeline as `auth_failed` and `auth_success`. [web:103][web:105]
+- Added SSH authentication statistics to session features, tracking failed and successful authentication attempts per session and exposing them to the anomaly scoring pipeline as `auth_failed` and `auth_success`.
 - Updated IP-based incident aggregation to use authentication data:
   - Grouped sessions by source IP.
-  - Aggregated total events, average anomaly score, total `auth_failed`, total `auth_success`, and computed an `auth_fail_ratio` per IP. [web:105][web:106]
+  - Aggregated total events, average anomaly score, total `auth_failed`, total `auth_success`, and computed an `auth_fail_ratio` per IP.
 - Extended the `Incident` model to store:
   - `auth_failed`
   - `auth_success`
   - `auth_fail_ratio`
-  so incidents carry security-relevant SSH auth context. [web:105]
+  so incidents carry security-relevant SSH auth context.
 
 ### CLI: incidents output with auth stats
 
 - Enhanced the `incidents` CLI command to show SSH authentication statistics per incident:
-  - Printed `auth_failed`, `auth_success`, and `auth_fail_ratio` in addition to existing fields such as `incident_id`, `ip`, `sessions`, `total_events`, and `avg_anomaly_score`. [web:105]
-- Confirmed that the top IP-based incidents surfaced in the CLI correspond to noisy SSH activity patterns consistent with brute-force attempts (high failed-auth counts, no successes). [web:105][web:106]
+  - Printed `auth_failed`, `auth_success`, and `auth_fail_ratio` in addition to existing fields such as `incident_id`, `ip`, `sessions`, `total_events`, and `avg_anomaly_score`.
+- Confirmed that the top IP-based incidents surfaced in the CLI correspond to noisy SSH activity patterns consistent with brute-force attempts (high failed-auth counts, no successes).
 
 ---
-
 
 ## 2026-03-19
 
 ### Incident severity heuristic
 
-- Extended the `Incident` dataclass with a `severity` field representing a simple textual risk level for each SSH incident. [web:105]
+- Extended the `Incident` dataclass with a `severity` field representing a simple textual risk level for each SSH incident.
 - Implemented a `_compute_severity` helper function that derives severity from:
   - Average anomaly score.
   - Total failed authentication attempts.
@@ -300,30 +299,29 @@
 - Defined an initial heuristic:
   - Mark incidents with very high failed-auth counts, near-100% failure ratio, and elevated anomaly score as `"high"` severity.
   - Mark moderately suspicious auth behavior as `"medium"`.
-  - Default remaining activity to `"low"`. [web:105][web:106]
+  - Default remaining activity to `"low"`.
 
 ### CLI: severity in incidents output
 
-- Updated `group_sessions_by_ip` to compute and attach a severity level for each IP-based incident using the aggregated SSH auth stats and anomaly scores. [web:105]
+- Updated `group_sessions_by_ip` to compute and attach a severity level for each IP-based incident using the aggregated SSH auth stats and anomaly scores.
 - Enhanced the `incidents` CLI output format to include the new `severity` field:
   - Example output now includes:  
-    `severity=<low|medium|high> sessions=... total_events=... auth_failed=... auth_success=... auth_fail_ratio=... avg_anomaly_score=...` [web:105][web:106]
-- Verified against `data/loghub/SSH.log` that top IP-based incidents with large numbers of failed SSH logins and zero successes are labeled as `severity=high`, matching expectations for brute-force style SSH scanning behavior. [web:105][web:106]
-
+    `severity=<low|medium|high> sessions=... total_events=... auth_failed=... auth_success=... auth_fail_ratio=... avg_anomaly_score=...`
+- Verified against `data/loghub/SSH.log` that top IP-based incidents with large numbers of failed SSH logins and zero successes are labeled as `severity=high`, matching expectations for brute-force style SSH scanning behavior.
 
 ## 2026-03-20
 
 ### AI-ready incident prompts
 
-- Introduced a new `aegislog.ai` module that builds **LLM-ready prompts** for SSH incidents using structured incident data (IP, severity, events, auth stats, anomaly score) plus the existing human-written summary. The prompt guides an AI assistant to explain what is happening, assess brute-force behavior, and suggest next steps for a junior analyst. [web:183][web:186][web:188]
-- Defined an `LLMIncidentPrompt` dataclass and a `build_incident_llm_prompt()` helper that returns a complete incident explanation prompt string without making any external API calls, creating a clean integration surface for future LLM clients. [web:183][web:186]
-- Added an `explain_incident_with_llm()` placeholder that currently just echoes the prompt text, keeping logic for building prompts and invoking models clearly separated for future implementation. [web:179][web:188]
+- Introduced a new `aegislog.ai` module that builds **LLM-ready prompts** for SSH incidents using structured incident data (IP, severity, events, auth stats, anomaly score) plus the existing human-written summary. The prompt guides an AI assistant to explain what is happening, assess brute-force behavior, and suggest next steps for a junior analyst.
+- Defined an `LLMIncidentPrompt` dataclass and a `build_incident_llm_prompt()` helper that returns a complete incident explanation prompt string without making any external API calls, creating a clean integration surface for future LLM clients.
+- Added an `explain_incident_with_llm()` placeholder that currently just echoes the prompt text, keeping logic for building prompts and invoking models clearly separated for future implementation.
 
 ### CLI: inspect LLM prompts for incidents
 
-- Extended the `incidents` CLI command with a `--print-llm-prompt` flag; when enabled, the CLI prints a fully formatted, ready-to-send LLM prompt between `llm_prompt_begin` and `llm_prompt_end` for each top SSH incident. This makes it easy to copy/paste directly into an LLM for manual testing. [web:183][web:186]
-- Wired the AI helper into `cmd_incidents`: after printing the incident fields and rule-based summary, the command now optionally generates and displays the LLM prompt built from the same data, aligning with patterns used in recent work on LLM-based event log analysis and incident summarization. [web:179][web:183][web:188]
-- Manually validated the end-to-end flow by running the `incidents` command with `--print-llm-prompt` against `data/loghub/SSH.log`, confirming that high-severity brute-force style SSH incidents produce clear summaries and detailed prompts suitable for AI-driven explanations. [web:185][web:187][web:192]
+- Extended the `incidents` CLI command with a `--print-llm-prompt` flag; when enabled, the CLI prints a fully formatted, ready-to-send LLM prompt between `llm_prompt_begin` and `llm_prompt_end` for each top SSH incident. This makes it easy to copy/paste directly into an LLM for manual testing.
+- Wired the AI helper into `cmd_incidents`: after printing the incident fields and rule-based summary, the command now optionally generates and displays the LLM prompt built from the same data, aligning with patterns used in recent work on LLM-based event log analysis and incident summarization.
+- Manually validated the end-to-end flow by running the `incidents` command with `--print-llm-prompt` against `data/loghub/SSH.log`, confirming that high-severity brute-force style SSH incidents produce clear summaries and detailed prompts suitable for AI-driven explanations.
 
 ![alt text](image-1.png)
 
@@ -331,64 +329,61 @@
 
 ![alt text](image-3.png)
 
-
 ## 2026-03-21
 
 ### Incident time windows
 
-- Extended the `Incident` model to record `first_seen` and `last_seen` timestamps for each SSH incident, giving every IP-based incident a clear time window. This follows common SIEM and threat-modeling patterns that track when suspicious activity starts and ends to support investigations and correlation. [web:215][web:216]
-- Updated the incident aggregation logic to derive `first_seen` and `last_seen` by scanning all events in the sessions associated with each IP, so the time bounds accurately reflect the observed SSH activity rather than a single log line. [web:121][web:211]
+- Extended the `Incident` model to record `first_seen` and `last_seen` timestamps for each SSH incident, giving every IP-based incident a clear time window. This follows common SIEM and threat-modeling patterns that track when suspicious activity starts and ends to support investigations and correlation.
+- Updated the incident aggregation logic to derive `first_seen` and `last_seen` by scanning all events in the sessions associated with each IP, so the time bounds accurately reflect the observed SSH activity rather than a single log line.
 
 ### CLI and summaries with time context
 
-- Enhanced the `incidents` CLI output to display a `time_window=<first_seen>..<last_seen>` field alongside severity, event counts, and auth statistics, making it easier to see when a brute-force-style SSH pattern occurred. [web:206][web:207]
-- Improved `summarize_incident` to include a short, human-readable sentence describing the timeframe of each incident (for example, “This activity was observed between <first_seen> and <last_seen>.”), aligning the summaries more closely with how analysts describe SSH brute-force campaigns. [web:208][web:212]
+- Enhanced the `incidents` CLI output to display a `time_window=<first_seen>..<last_seen>` field alongside severity, event counts, and auth statistics, making it easier to see when a brute-force-style SSH pattern occurred.
+- Improved `summarize_incident` to include a short, human-readable sentence describing the timeframe of each incident (for example, “This activity was observed between <first_seen> and <last_seen>.”), aligning the summaries more closely with how analysts describe SSH brute-force campaigns.
 
 ### LLM prompts enriched with timestamps
 
-- Updated the LLM incident prompt builder in `aegislog.ai` to include `First seen` and `Last seen` lines in the structured incident context whenever timestamps are available, so any future AI explainer can reason about the duration and timing of suspicious SSH activity. [web:179][web:188]
-- Verified that the `--print-llm-prompt` option in the `incidents` CLI now produces prompts that contain IP, severity, auth statistics, anomaly scores, and the incident time window, making the prompts more informative and in line with best practices for LLM-based security incident analysis. [web:179][web:188]
+- Updated the LLM incident prompt builder in `aegislog.ai` to include `First seen` and `Last seen` lines in the structured incident context whenever timestamps are available, so any future AI explainer can reason about the duration and timing of suspicious SSH activity.
+- Verified that the `--print-llm-prompt` option in the `incidents` CLI now produces prompts that contain IP, severity, auth statistics, anomaly scores, and the incident time window, making the prompts more informative and in line with best practices for LLM-based security incident analysis.
 
 ![alt text](image-4.png)
-
 
 ## 2026-03-22
 
 ### Rule-based incident recommendations
 
-- Added a `recommend_incident_actions()` helper for SSH incidents that suggests simple, playbook-style next steps based on incident characteristics (e.g., high failed-auth counts with no successes). The helper recommends blocking or rate-limiting abusive IPs and reviewing targeted accounts, aligning with common SSH brute-force response guidance. [web:258][web:261][web:263]
-- Integrated recommended actions into `summarize_incident`, appending a concise “Recommended actions:” section to the incident description so summaries now include both what happened and what to do next. [web:251][web:262]
+- Added a `recommend_incident_actions()` helper for SSH incidents that suggests simple, playbook-style next steps based on incident characteristics (e.g., high failed-auth counts with no successes). The helper recommends blocking or rate-limiting abusive IPs and reviewing targeted accounts, aligning with common SSH brute-force response guidance.
+- Integrated recommended actions into `summarize_incident`, appending a concise “Recommended actions:” section to the incident description so summaries now include both what happened and what to do next.
 
 ### AI prompts enriched with actions
 
-- Updated the LLM incident prompt builder in `aegislog.ai` to include a “Here are preliminary, rule-based recommended actions” block populated from `recommend_incident_actions()`, giving any future LLM a concrete starting set of remediation ideas to refine. This mirrors how many AI SOC tools pair structured data with canned guidance in their prompts. [web:179][web:188][web:256]
-- Verified that `--print-llm-prompt` output for SSH incidents now contains both the time window and recommended actions, making the prompts more informative and closer to real-world AI incident copilot designs. [web:188][web:292]
+- Updated the LLM incident prompt builder in `aegislog.ai` to include a “Here are preliminary, rule-based recommended actions” block populated from `recommend_incident_actions()`, giving any future LLM a concrete starting set of remediation ideas to refine. This mirrors how many AI SOC tools pair structured data with canned guidance in their prompts.
+- Verified that `--print-llm-prompt` output for SSH incidents now contains both the time window and recommended actions, making the prompts more informative and closer to real-world AI incident copilot designs.
 
 ### Local AI-style explanations and explain subcommand
 
-- Implemented a `local_incident_explanation()` helper that generates a short, rule-based narrative for each SSH incident (severity, behavior, timing, and recommended actions), mimicking an AI-generated explanation without calling any external model. [web:251][web:256][web:290]
-- Extended the `incidents` CLI command with a `--show-local-explanation` flag that prints the local explanation between `local_explanation_begin` and `local_explanation_end`, next to the structured incident fields and summary. [web:288][web:291]
-- Introduced a new `explain` subcommand that focuses on a single SSH incident selected by index, printing its core fields, summary, local AI-style explanation, and an LLM-ready prompt bundle in one place. This subcommand acts as a small “incident copilot” interface on top of the existing detection pipeline. [web:128][web:288][web:292]
+- Implemented a `local_incident_explanation()` helper that generates a short, rule-based narrative for each SSH incident (severity, behavior, timing, and recommended actions), mimicking an AI-generated explanation without calling any external model.
+- Extended the `incidents` CLI command with a `--show-local-explanation` flag that prints the local explanation between `local_explanation_begin` and `local_explanation_end`, next to the structured incident fields and summary.
+- Introduced a new `explain` subcommand that focuses on a single SSH incident selected by index, printing its core fields, summary, local AI-style explanation, and an LLM-ready prompt bundle in one place. This subcommand acts as a small “incident copilot” interface on top of the existing detection pipeline.
 
 ![alt text](image-5.png)
-
 
 ## 2026-03-23
 
 ### AI helpers and incident modeling cleanup
 
-- Refined the `Incident` model and aggregation logic in `incidents.py` for clarity and consistency, tightening types, formatting, and severity heuristics while preserving behavior (including auth stats, time window, and recommended actions). This makes the incident representation cleaner and easier to extend. [web:179][web:188]
-- Polished `summarize_incident()` and `recommend_incident_actions()` so that brute-force hints, time window, and recommended actions are composed into a single well-formed paragraph, improving readability for both humans and downstream AI consumers. [web:188][web:381]
+- Refined the `Incident` model and aggregation logic in `incidents.py` for clarity and consistency, tightening types, formatting, and severity heuristics while preserving behavior (including auth stats, time window, and recommended actions). This makes the incident representation cleaner and easier to extend.
+- Polished `summarize_incident()` and `recommend_incident_actions()` so that brute-force hints, time window, and recommended actions are composed into a single well-formed paragraph, improving readability for both humans and downstream AI consumers.
 
 ### AI prompt and local explanation improvements
 
-- Cleaned up `aegislog.ai` by simplifying `local_incident_explanation()` into a concise 2–4 sentence narrative that describes severity, behavior, timing, and next steps, making the local, rule-based “AI-style” explanation more readable and closer to real LLM output. [web:188][web:382]
-- Simplified `build_incident_llm_prompt()` to reuse `recommend_incident_actions()` when building the “preliminary, rule-based recommended actions” block and tightened string assembly, resulting in a clearer, easier-to-maintain incident prompt template. [web:179][web:380]
+- Cleaned up `aegislog.ai` by simplifying `local_incident_explanation()` into a concise 2–4 sentence narrative that describes severity, behavior, timing, and next steps, making the local, rule-based “AI-style” explanation more readable and closer to real LLM output.
+- Simplified `build_incident_llm_prompt()` to reuse `recommend_incident_actions()` when building the “preliminary, rule-based recommended actions” block and tightened string assembly, resulting in a clearer, easier-to-maintain incident prompt template.
 
 ### CLI explain/incidents command cleanup and JSON output
 
-- Refactored the `incidents` and `explain` commands in `cli.py` to remove duplicate LLM prompt printing, ensure the incident `time_window` is displayed, and consistently use the shared helpers for summaries, local explanations, and prompts. This keeps the CLI behavior predictable and AI-ready. [web:379][web:386]
-- Added a `--format json` option to the `explain` command that emits a single structured JSON object containing the incident fields, summary, local explanation, and LLM prompt. This enables easy integration with other tools, scripts, or notebooks that want to consume AI-ready incident context programmatically. [web:376][web:379][web:386]
+- Refactored the `incidents` and `explain` commands in `cli.py` to remove duplicate LLM prompt printing, ensure the incident `time_window` is displayed, and consistently use the shared helpers for summaries, local explanations, and prompts. This keeps the CLI behavior predictable and AI-ready.
+- Added a `--format json` option to the `explain` command that emits a single structured JSON object containing the incident fields, summary, local explanation, and LLM prompt. This enables easy integration with other tools, scripts, or notebooks that want to consume AI-ready incident context programmatically.
 
 ![alt text](image-6.png)
 
