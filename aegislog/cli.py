@@ -6,6 +6,8 @@ from aegislog.features.sessions import build_sessions
 from aegislog.ml.pipeline import score_sessions
 from aegislog.incidents import group_sessions_by_ip, summarize_incident
 from aegislog.ai import build_incident_llm_prompt, explain_incident_with_llm, local_incident_explanation
+from aegislog.ai_client import call_llm_for_incident, LLMConfigError
+
 
 def cmd_explain(args: argparse.Namespace) -> None:
     if args.log_type != "ssh_auth":
@@ -50,6 +52,23 @@ def cmd_explain(args: argparse.Namespace) -> None:
     print("  local_explanation_end")
 
     llm_prompt = build_incident_llm_prompt(inc, summary)
+
+    if args.use_llm:
+        try:
+            llm_response = call_llm_for_incident(llm_prompt)
+            print("  llm_response_begin")
+            for line in llm_response.splitlines():
+                print(f"    {line}")
+            print("  llm_response_end")
+        except LLMConfigError as e:
+            print(f"  [LLM disabled] {e}")
+    else:
+        # keep printing the raw prompt for debugging
+        prompt_text = explain_incident_with_llm(llm_prompt)
+        print("  llm_prompt_begin")
+        for line in prompt_text.splitlines():
+            print(f"    {line}")
+        print("  llm_prompt_end")
     prompt_text = explain_incident_with_llm(llm_prompt)
     print("  llm_prompt_begin")
     for line in prompt_text.splitlines():
@@ -232,6 +251,11 @@ def main() -> None:
         type=int,
         default=0,
         help="Zero-based index into the sorted list of incidents to explain.",
+    )
+    p_explain.add_argument(
+        "--use-llm",
+        action="store_true",
+        help="If set, call a real LLM to generate an incident explanation (requires OPENAI_API_KEY).",
     )
     p_explain.set_defaults(func=cmd_explain)
 
