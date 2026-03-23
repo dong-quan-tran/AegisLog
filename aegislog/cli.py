@@ -1,4 +1,5 @@
 import argparse
+import json
 
 from aegislog.parsing.apache_error import parse_error_file
 from aegislog.parsing.auth_ssh import parse_ssh_file
@@ -60,6 +61,31 @@ def cmd_explain(args: argparse.Namespace) -> None:
 
     llm_prompt = build_incident_llm_prompt(inc, summary)
 
+    if getattr(args, "format", "text") == "json":
+        payload = {
+            "incident": {
+                "incident_id": inc.incident_id,
+                "ip": inc.ip,
+                "severity": inc.severity,
+                "session_ids": inc.session_ids,
+                "total_events": inc.total_events,
+                "avg_anomaly_score": inc.avg_anomaly_score,
+                "auth_failed": inc.auth_failed,
+                "auth_success": inc.auth_success,
+                "auth_fail_ratio": inc.auth_fail_ratio,
+                "first_seen": inc.first_seen.isoformat() if inc.first_seen else None,
+                "last_seen": inc.last_seen.isoformat() if inc.last_seen else None,
+            },
+            "summary": {
+                "title": summary.title,
+                "description": summary.description,
+            },
+            "local_explanation": explanation,
+            "llm_prompt": llm_prompt.prompt,
+        }
+        print(json.dumps(payload, indent=2))
+        return
+    
     if getattr(args, "use_llm", False):
         try:
             llm_response = call_llm_for_incident(llm_prompt)
@@ -269,6 +295,12 @@ def main() -> None:
             "If set, call a real LLM to generate an incident explanation "
             "(requires OPENAI_API_KEY)."
         ),
+    )
+    p_explain.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format for the explanation (default: text).",
     )
     p_explain.set_defaults(func=cmd_explain)
 
