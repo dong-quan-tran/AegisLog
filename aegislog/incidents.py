@@ -1,11 +1,12 @@
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
-from collections import defaultdict
 
 from aegislog.features.sessions import Session
+
 
 @dataclass
 class Incident:
@@ -21,18 +22,18 @@ class Incident:
     first_seen: Optional[datetime]
     last_seen: Optional[datetime]
 
+
 @dataclass
 class IncidentSummary:
     incident_id: str
     title: str
     description: str
 
+
 def recommend_incident_actions(incident: Incident) -> List[str]:
     actions: List[str] = []
-
     ip = incident.ip or "unknown"
 
-    # Basic SSH brute-force handling
     if incident.auth_failed >= 100 and incident.auth_fail_ratio >= 0.9:
         actions.append(
             f"Block or rate-limit SSH access from source IP {ip} at the firewall or perimeter."
@@ -41,7 +42,6 @@ def recommend_incident_actions(incident: Incident) -> List[str]:
             "Review authentication logs for the targeted accounts to confirm no unauthorized access occurred."
         )
 
-    # If there are any successes, focus on potential compromise
     if incident.auth_success > 0:
         actions.append(
             "Investigate successful SSH logins during this incident window for signs of account compromise."
@@ -50,13 +50,13 @@ def recommend_incident_actions(incident: Incident) -> List[str]:
             "Reset credentials and enforce multi-factor authentication on affected accounts if possible."
         )
 
-    # General hardening
     if not actions:
         actions.append(
             "Review SSH configuration and authentication policies to ensure best practices are in place."
         )
 
     return actions
+
 
 def summarize_incident(incident: Incident) -> IncidentSummary:
     ip = incident.ip or "unknown"
@@ -77,57 +77,62 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
         auth_phrase = "no SSH authentication activity recorded"
 
     brute_force_hint = ""
-    if incident.auth_failed >= 100 and incident.auth_success == 0 and incident.auth_fail_ratio >= 0.9:
-        brute_force_hint = " This pattern is consistent with SSH brute-force or password-spraying activity."
+    if (
+        incident.auth_failed >= 100
+        and incident.auth_success == 0
+        and incident.auth_fail_ratio >= 0.9
+    ):
+        brute_force_hint = (
+            " This pattern is consistent with SSH brute-force or password-spraying activity."
+        )
 
     if incident.first_seen and incident.last_seen:
         time_phrase = (
-            f" This activity was observed between "
+            " This activity was observed between "
             f"{incident.first_seen.isoformat()} and {incident.last_seen.isoformat()}."
         )
     else:
         time_phrase = ""
+
     description = (
         f"IP {ip} generated {incident.total_events} SSH log events across "
         f"{len(incident.session_ids)} session(s), with {auth_phrase}. "
         f"Authentication failure ratio is {incident.auth_fail_ratio:.2f} and the "
         f"average anomaly score is {incident.avg_anomaly_score:.3f}."
         f"{brute_force_hint}"
-        f"{time_phrase}"  
+        f"{time_phrase}"
     )
 
     actions = recommend_incident_actions(incident)
     if actions:
-        actions_text = " Recommended actions: " + "; ".join(actions)
-        description += actions_text
-        
+        description += " Recommended actions: " + "; ".join(actions) + "."
+
     return IncidentSummary(
         incident_id=incident.incident_id,
         title=title,
         description=description,
     )
 
+
 def _compute_severity(
     avg_anomaly_score: float,
     auth_failed: int,
     auth_fail_ratio: float,
 ) -> str:
-    # Simple heuristic just to start; you can tune later.
     if auth_failed >= 1000 and auth_fail_ratio >= 0.9 and avg_anomaly_score >= 0.25:
         return "high"
     if auth_failed >= 200 and auth_fail_ratio >= 0.7 and avg_anomaly_score >= 0.15:
         return "medium"
     return "low"
 
+
 def group_sessions_by_ip(
-    sessions: list[Session],
+    sessions: List[Session],
     scores_df: pd.DataFrame,
     min_sessions: int = 1,
-) -> list[Incident]:
-    by_ip: dict[str, list[dict]] = defaultdict(list)
-
-    # Map session_id -> Session for timestamp lookup
-    session_by_id = {s.session_id: s for s in sessions}
+) -> List[Incident]:
+    by_ip: Dict[str, List[dict]] = defaultdict(list)
+    session_by_id: Dict[str, Session] = {s.session_id: s for s in sessions}
 
     for _, row in scores_df.iterrows():
         ip = row["ip"]
@@ -143,7 +148,8 @@ def group_sessions_by_ip(
             }
         )
 
-    incidents: list[Incident] = []
+    incidents: List[Incident] = []
+
     for idx, (ip, sess_list) in enumerate(by_ip.items()):
         if len(sess_list) < min_sessions:
             continue
@@ -159,8 +165,7 @@ def group_sessions_by_ip(
         auth_total = total_failed + total_success
         auth_fail_ratio = total_failed / auth_total if auth_total else 0.0
 
-        # Collect all timestamps for this IP
-        timestamps: list[datetime] = []
+        timestamps: List[datetime] = []
         for s in sess_list:
             sess = session_by_id.get(s["session_id"])
             if not sess:
@@ -173,9 +178,8 @@ def group_sessions_by_ip(
         first_seen = min(timestamps) if timestamps else None
         last_seen = max(timestamps) if timestamps else None
 
-        incident_id = f"ip:{ip}#{idx}"
-        
         severity = _compute_severity(avg_score, total_failed, auth_fail_ratio)
+        incident_id = f"ip:{ip}#{idx}"
 
         incidents.append(
             Incident(
