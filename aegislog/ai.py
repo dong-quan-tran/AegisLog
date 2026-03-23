@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 
-from aegislog.incidents import Incident, IncidentSummary, recommend_incident_actions
+from aegislog.incidents import (
+    Incident,
+    IncidentSummary,
+    recommend_incident_actions,
+)
 
 
 @dataclass
@@ -21,7 +25,7 @@ def local_incident_explanation(
     """
     ip = incident.ip or "unknown"
 
-    parts = []
+    parts: list[str] = []
 
     parts.append(
         f"This appears to be a {incident.severity} severity SSH incident from {ip}, "
@@ -37,7 +41,8 @@ def local_incident_explanation(
 
     if incident.auth_failed >= 100 and incident.auth_fail_ratio >= 0.9:
         parts.append(
-            "The pattern of many failures and no successes is consistent with SSH brute-force or password-spraying activity."
+            "The pattern of many failures and no successes is consistent with SSH brute-force "
+            "or password-spraying activity."
         )
 
     actions = recommend_incident_actions(incident)
@@ -71,11 +76,12 @@ def build_incident_llm_prompt(
         time_lines = ""
 
     actions = recommend_incident_actions(incident)
-    actions_block = ""
     if actions:
-        actions_block = "Here are preliminary, rule-based recommended actions:\n"
-        for a in actions:
-            actions_block += f"- {a}\n"
+        actions_block = "Here are preliminary, rule-based recommended actions:\n" + "".join(
+            f"- {a}\n" for a in actions
+        )
+    else:
+        actions_block = ""
 
     prompt = f"""You are a security analyst AI assistant.
 
