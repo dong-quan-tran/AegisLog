@@ -4,8 +4,15 @@ from aegislog.parsing.apache_error import parse_error_file
 from aegislog.parsing.auth_ssh import parse_ssh_file
 from aegislog.features.sessions import build_sessions
 from aegislog.ml.pipeline import score_sessions
-from aegislog.incidents import group_sessions_by_ip, summarize_incident
-from aegislog.ai import build_incident_llm_prompt, explain_incident_with_llm, local_incident_explanation
+from aegislog.incidents import (
+    group_sessions_by_ip,
+    summarize_incident,
+)
+from aegislog.ai import (
+    build_incident_llm_prompt,
+    explain_incident_with_llm,
+    local_incident_explanation,
+)
 from aegislog.ai_client import call_llm_for_incident, LLMConfigError
 
 
@@ -53,7 +60,7 @@ def cmd_explain(args: argparse.Namespace) -> None:
 
     llm_prompt = build_incident_llm_prompt(inc, summary)
 
-    if args.use_llm:
+    if getattr(args, "use_llm", False):
         try:
             llm_response = call_llm_for_incident(llm_prompt)
             print("  llm_response_begin")
@@ -63,17 +70,12 @@ def cmd_explain(args: argparse.Namespace) -> None:
         except LLMConfigError as e:
             print(f"  [LLM disabled] {e}")
     else:
-        # keep printing the raw prompt for debugging
         prompt_text = explain_incident_with_llm(llm_prompt)
         print("  llm_prompt_begin")
         for line in prompt_text.splitlines():
             print(f"    {line}")
         print("  llm_prompt_end")
-    prompt_text = explain_incident_with_llm(llm_prompt)
-    print("  llm_prompt_begin")
-    for line in prompt_text.splitlines():
-        print(f"    {line}")
-    print("  llm_prompt_end")
+
 
 def cmd_incidents(args: argparse.Namespace) -> None:
     if args.log_type != "ssh_auth":
@@ -93,17 +95,17 @@ def cmd_incidents(args: argparse.Namespace) -> None:
 
     print(f"Top {len(top)} IP-based incidents:")
     for inc in top:
-
         if inc.first_seen and inc.last_seen:
             time_window = (
                 f"{inc.first_seen.isoformat()}..{inc.last_seen.isoformat()}"
             )
         else:
             time_window = "unknown"
-            
+
         print(
             f"- incident_id={inc.incident_id} ip={inc.ip} "
             f"severity={inc.severity} "
+            f"time_window={time_window} "
             f"sessions={len(inc.session_ids)} "
             f"total_events={inc.total_events} "
             f"auth_failed={inc.auth_failed} auth_success={inc.auth_success} "
@@ -115,13 +117,13 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         print(f"  summary_title={summary.title}")
         print(f"  summary_description={summary.description}")
 
-        if args.show_local_explanation:
+        if getattr(args, "show_local_explanation", False):
             explanation = local_incident_explanation(inc, summary)
             print("  local_explanation_begin")
             print(f"    {explanation}")
             print("  local_explanation_end")
 
-        if args.print_llm_prompt:
+        if getattr(args, "print_llm_prompt", False):
             llm_prompt = build_incident_llm_prompt(inc, summary)
             prompt_text = explain_incident_with_llm(llm_prompt)
             print("  llm_prompt_begin")
@@ -129,12 +131,16 @@ def cmd_incidents(args: argparse.Namespace) -> None:
                 print(f"    {line}")
             print("  llm_prompt_end")
 
+
 def cmd_init(args: argparse.Namespace) -> None:
     print("Init placeholder: will set up SQLite experiment DB.")
 
+
 def cmd_train(args: argparse.Namespace) -> None:
     from aegislog.ml.train import main as train_main
+
     train_main()
+
 
 def cmd_analyze(args: argparse.Namespace) -> None:
     if args.log_type == "apache_error":
@@ -162,6 +168,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
             f"anomaly_score={row['anomaly_score']:.3f}"
         )
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="aegislog")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -178,7 +185,9 @@ def main() -> None:
     )
     p_train.set_defaults(func=cmd_train)
 
-    p_analyze = subparsers.add_parser("analyze", help="Analyze logs and detect incidents.")
+    p_analyze = subparsers.add_parser(
+        "analyze", help="Analyze logs and detect incidents."
+    )
     p_analyze.add_argument("log_path", help="Path to log file.")
     p_analyze.add_argument(
         "--model-path",
@@ -231,6 +240,7 @@ def main() -> None:
         help="For each incident, print a ready-to-send LLM explanation prompt.",
     )
     p_incidents.set_defaults(func=cmd_incidents)
+
     p_explain = subparsers.add_parser(
         "explain", help="Explain a single SSH incident with AI-style output."
     )
@@ -255,13 +265,16 @@ def main() -> None:
     p_explain.add_argument(
         "--use-llm",
         action="store_true",
-        help="If set, call a real LLM to generate an incident explanation (requires OPENAI_API_KEY).",
+        help=(
+            "If set, call a real LLM to generate an incident explanation "
+            "(requires OPENAI_API_KEY)."
+        ),
     )
     p_explain.set_defaults(func=cmd_explain)
 
     args = parser.parse_args()
     args.func(args)
 
+
 if __name__ == "__main__":
     main()
-
