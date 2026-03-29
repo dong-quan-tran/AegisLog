@@ -119,6 +119,44 @@ def cmd_incidents(args: argparse.Namespace) -> None:
     incidents = group_sessions_by_ip(sessions, df)
     top = incidents[: args.top]
 
+    if getattr(args, "format", "text") == "json":
+        payload = []
+        for inc in top:
+            summary = summarize_incident(inc)
+            explanation = local_incident_explanation(inc, summary)
+            llm_prompt = build_incident_llm_prompt(inc, summary)
+
+            payload.append(
+                {
+                    "incident": {
+                        "incident_id": inc.incident_id,
+                        "ip": inc.ip,
+                        "severity": inc.severity,
+                        "session_ids": inc.session_ids,
+                        "total_events": inc.total_events,
+                        "avg_anomaly_score": inc.avg_anomaly_score,
+                        "auth_failed": inc.auth_failed,
+                        "auth_success": inc.auth_success,
+                        "auth_fail_ratio": inc.auth_fail_ratio,
+                        "first_seen": inc.first_seen.isoformat()
+                        if inc.first_seen
+                        else None,
+                        "last_seen": inc.last_seen.isoformat()
+                        if inc.last_seen
+                        else None,
+                    },
+                    "summary": {
+                        "title": summary.title,
+                        "description": summary.description,
+                    },
+                    "local_explanation": explanation,
+                    "llm_prompt": llm_prompt.prompt,
+                }
+            )
+
+        print(json.dumps(payload, indent=2))
+        return
+
     print(f"Top {len(top)} IP-based incidents:")
     for inc in top:
         if inc.first_seen and inc.last_seen:
@@ -301,6 +339,12 @@ def main() -> None:
         choices=["text", "json"],
         default="text",
         help="Output format for the explanation (default: text).",
+    )
+    p_incidents.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format for incidents (default: text).",
     )
     p_explain.set_defaults(func=cmd_explain)
 
