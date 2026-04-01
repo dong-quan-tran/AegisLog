@@ -83,7 +83,12 @@ def cmd_explain(args: argparse.Namespace) -> None:
             "local_explanation": explanation,
             "llm_prompt": llm_prompt.prompt,
         }
-        print(json.dumps(payload, indent=2))
+        data = json.dumps(payload, indent=2)
+        if getattr(args, "output", None):
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(data + "\n")
+        else:
+            print(data)
         return
     
     if getattr(args, "use_llm", False):
@@ -392,6 +397,10 @@ def main() -> None:
         choices=["text", "json"],
         default="text",
         help="Output format for the explanation (default: text).",
+    )
+    p_explain.add_argument(
+        "--output",
+        help="Optional path to write JSON output instead of stdout.",
     )
     p_explain.set_defaults(func=cmd_explain)
 
