@@ -388,3 +388,37 @@
 ![alt text](image-6.png)
 
 ![alt text](image-7.png)
+
+
+## 2026-03-29
+
+**Focus:** AegisLog CLI UX, JSON output, and documentation.
+
+### Completed
+- Reviewed and understood existing `aegislog.cli` subcommands (`init`, `train`, `analyze`, `incidents`, `explain`), including `--log-type` and `--model-path` usage.
+- Extended the `incidents` subcommand to support `--format json`, returning:
+  - `incident` metadata (IP, severity, timestamps, auth stats, anomaly score).
+  - `summary` (title + description).
+  - `local_explanation` (rule-based AI-style explanation).
+  - `llm_prompt` (ready-to-send LLM prompt).
+- Verified `incidents --format json` against `data/loghub/SSH.log` with:
+  - `--log-type ssh_auth`
+  - `--model-path models/log_anomaly_iforest_ssh.joblib`
+  - `--top 3`
+- Confirmed that `explain` already supports `--format json` and validated example output.
+- Created `cli_usage_cheatsheet.md` draft documenting:
+  - All 5 subcommands.
+  - Key arguments (`--log-type`, `--model-path`, `--top`, `--format`, `--use-llm`, etc.).
+  - Copy-pasteable example commands for each subcommand.
+
+### Notes / Learnings
+- `analyze` supports both `apache_error` and `ssh_auth` log types using the general model `models/log_anomaly_iforest.joblib`.
+- `incidents` and `explain` are currently SSH-only (`ssh_auth`) and use the SSH-specific model `models/log_anomaly_iforest_ssh.joblib`.
+- JSON output for both `incidents` and `explain` is now suitable for downstream automation and LLM-based workflows.
+
+### Next Ideas
+- Add PowerShell-specific examples (with backticks) alongside the bash examples in the CLI cheatsheet.
+- Implement and wire up the `init` subcommand to actually set up a SQLite experiment database.
+- Add basic unit/integration tests for `incidents --format json` and `explain --format json` to guard against regressions.
+
+![alt text](image-8.png)
