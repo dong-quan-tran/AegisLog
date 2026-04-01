@@ -224,11 +224,19 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     if getattr(args, "format", "text") == "json":
         payload = []
         for _, row in top.iterrows():
+            user = row["user"]
+            if user != user:  # NaN check
+                user = None
+
+            ip = row["ip"]
+            if ip != ip:
+                ip = None
+
             payload.append(
                 {
                     "session_id": row["session_id"],
-                    "ip": row["ip"],
-                    "user": row["user"],
+                    "ip": ip,
+                    "user": user,
                     "event_count": int(row["event_count"]),
                     "error_ratio": float(row["error_ratio"]),
                     "anomaly_score": float(row["anomaly_score"]),
