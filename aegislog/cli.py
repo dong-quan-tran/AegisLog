@@ -221,6 +221,21 @@ def cmd_analyze(args: argparse.Namespace) -> None:
 
     df_sorted = df.sort_values("anomaly_score", ascending=False)
     top = df_sorted.head(args.top)
+    if getattr(args, "format", "text") == "json":
+        payload = []
+        for _, row in top.iterrows():
+            payload.append(
+                {
+                    "session_id": row["session_id"],
+                    "ip": row["ip"],
+                    "user": row["user"],
+                    "event_count": int(row["event_count"]),
+                    "error_ratio": float(row["error_ratio"]),
+                    "anomaly_score": float(row["anomaly_score"]),
+                }
+            )
+        print(json.dumps(payload, indent=2))
+        return
 
     print(f"Top {len(top)} anomalous sessions:")
     for _, row in top.iterrows():
