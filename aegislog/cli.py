@@ -234,7 +234,12 @@ def cmd_analyze(args: argparse.Namespace) -> None:
                     "anomaly_score": float(row["anomaly_score"]),
                 }
             )
-        print(json.dumps(payload, indent=2))
+        data = json.dumps(payload, indent=2)
+        if getattr(args, "output", None):
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(data + "\n")
+        else:
+            print(data)
         return
 
     print(f"Top {len(top)} anomalous sessions:")
@@ -284,6 +289,16 @@ def main() -> None:
         type=int,
         default=5,
         help="Number of most anomalous sessions to print.",
+    )
+    p_analyze.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format for analysis results (default: text).",
+    )
+    p_analyze.add_argument(
+        "--output",
+        help="Optional path to write JSON output instead of stdout.",
     )
     p_analyze.set_defaults(func=cmd_analyze)
 
