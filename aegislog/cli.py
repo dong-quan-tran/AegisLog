@@ -154,7 +154,12 @@ def cmd_incidents(args: argparse.Namespace) -> None:
                 }
             )
 
-        print(json.dumps(payload, indent=2))
+        data = json.dumps(payload, indent=2)
+        if getattr(args, "output", None):
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(data + "\n")
+        else:
+            print(data)
         return
 
     print(f"Top {len(top)} IP-based incidents:")
@@ -346,6 +351,10 @@ def main() -> None:
         choices=["text", "json"],
         default="text",
         help="Output format for incidents (default: text).",
+    )
+    p_incidents.add_argument(
+        "--output",
+        help="Optional path to write JSON output instead of stdout.",
     )
     p_incidents.set_defaults(func=cmd_incidents)
 
