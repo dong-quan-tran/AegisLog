@@ -303,6 +303,12 @@ def main() -> None:
         action="store_true",
         help="For each incident, print a ready-to-send LLM explanation prompt.",
     )
+    p_incidents.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format for incidents (default: text).",
+    )
     p_incidents.set_defaults(func=cmd_incidents)
 
     p_explain = subparsers.add_parser(
@@ -339,12 +345,6 @@ def main() -> None:
         choices=["text", "json"],
         default="text",
         help="Output format for the explanation (default: text).",
-    )
-    p_incidents.add_argument(
-        "--format",
-        choices=["text", "json"],
-        default="text",
-        help="Output format for incidents (default: text).",
     )
     p_explain.set_defaults(func=cmd_explain)
 
