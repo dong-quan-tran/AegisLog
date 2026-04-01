@@ -272,7 +272,18 @@ def cmd_analyze(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="aegislog")
+    parser = argparse.ArgumentParser(
+        prog="aegislog",
+        description="Analyze logs, detect anomalous sessions, group SSH incidents, and generate incident explanations.",
+        epilog=(
+            "Examples:\n"
+            "  aegislog analyze data/loghub/SSH.log --log-type ssh_auth --top 5\n"
+            "  aegislog analyze data/loghub/SSH.log --log-type ssh_auth --format json --output analyze.json\n"
+            "  aegislog incidents data/loghub/SSH.log --top 3 --format json --output incidents.json\n"
+            "  aegislog explain data/loghub/SSH.log --index 0 --format json --output explain.json\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     p_init = subparsers.add_parser("init", help="Initialize experiment database.")
@@ -288,7 +299,7 @@ def main() -> None:
     p_train.set_defaults(func=cmd_train)
 
     p_analyze = subparsers.add_parser(
-        "analyze", help="Analyze logs and detect incidents."
+        "analyze", help="Analyze logs and print top anomalous sessions."
     )
     p_analyze.add_argument("log_path", help="Path to log file.")
     p_analyze.add_argument(
