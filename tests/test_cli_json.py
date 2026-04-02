@@ -1,4 +1,3 @@
-import json
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -53,7 +52,7 @@ def test_incident_to_dict_returns_expected_shape():
         description="Test description",
     )
     llm_prompt = SimpleNamespace(
-        prompt="Explain this incident.",
+        prompt="Explain this incident",
     )
 
     data = incident_to_dict(
@@ -65,6 +64,10 @@ def test_incident_to_dict_returns_expected_shape():
 
     assert data["incident"]["incident_id"] == "ip:1.2.3.4#1"
     assert data["incident"]["ip"] == "1.2.3.4"
+    assert data["incident"]["severity"] == "high"
     assert data["summary"]["title"] == "Test incident"
+    assert data["summary"]["description"] == "Test description"
     assert data["local_explanation"] == "Local explanation text"
     assert data["llm_prompt"] == "Explain this incident"
+    assert data["incident"]["first_seen"] == "2025-01-01T12:00:00"
+    assert data["incident"]["last_seen"] == "2025-01-01T12:30:00"
