@@ -44,7 +44,9 @@ def build_sessions(events: Iterable[LogEvent], gap_minutes: int = 30) -> list[Se
         if not current or current_key is None:
             return
         ip, user, ua = current_key
-        session_id = f"{ip}|{user}|{len(sessions)}"
+        first_ts = current[0].timestamp.isoformat()
+        # Use a stable, readable ID: ip||user||first_timestamp
+        session_id = f"{ip or ''}||{user or ''}||{first_ts}"
         sessions.append(Session(
             session_id=session_id,
             ip=ip or None,
