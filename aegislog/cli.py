@@ -201,6 +201,11 @@ def cmd_incidents(args: argparse.Namespace) -> None:
                 print(f"    {line}")
             print("  llm_prompt_end")
 
+def cmd_examples(args: argparse.Namespace) -> None:
+    print("Example commands:")
+    print("  aegislog analyze data/loghub/SSH.log --log-type ssh_auth --profile ssh")
+    print("  aegislog incidents data/loghub/SSH.log --log-type ssh_auth")
+    print("  aegislog explain data/loghub/SSH.log --log-type ssh_auth --index 0")
 
 def cmd_init(args: argparse.Namespace) -> None:
     print("Init placeholder: will set up SQLite experiment DB.")
@@ -271,7 +276,10 @@ def main(argv: list[str] | None = None) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-
+    p_examples = subparsers.add_parser(
+        "examples", help="Show example log_path/log-type/model-path combinations."
+    )
+    p_examples.set_defaults(func=cmd_examples)
     p_init = subparsers.add_parser("init", help="Initialize experiment database.")
     p_init.set_defaults(func=cmd_init)
 
