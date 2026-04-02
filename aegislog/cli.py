@@ -17,6 +17,56 @@ from aegislog.ai import (
 from aegislog.ai_client import call_llm_for_incident, LLMConfigError
 
 
+def write_output(data: str, output_path: str | None) -> None:
+    if output_path:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(data + "\n")
+    else:
+        print(data)
+
+
+def session_row_to_dict(row) -> dict:
+    user = row["user"]
+    if user != user:
+        user = None
+
+    ip = row["ip"]
+    if ip != ip:
+        ip = None
+
+    return {
+        "session_id": row["session_id"],
+        "ip": ip,
+        "user": user,
+        "event_count": int(row["event_count"]),
+        "error_ratio": float(row["error_ratio"]),
+        "anomaly_score": float(row["anomaly_score"]),
+    }
+
+
+def incident_to_dict(inc, summary, explanation, llm_prompt) -> dict:
+    return {
+        "incident": {
+            "incident_id": inc.incident_id,
+            "ip": inc.ip,
+            "severity": inc.severity,
+            "session_ids": inc.session_ids,
+            "total_events": inc.total_events,
+            "avg_anomaly_score": inc.avg_anomaly_score,
+            "auth_failed": inc.auth_failed,
+            "auth_success": inc.auth_success,
+            "auth_fail_ratio": inc.auth_fail_ratio,
+            "first_seen": inc.first_seen.isoformat() if inc.first_seen else None,
+            "last_seen": inc.last_seen.isoformat() if inc.last_seen else None,
+        },
+        "summary": {
+            "title": summary.title,
+            "description": summary.description,
+        },
+        "local_explanation": explanation,
+        "llm_prompt": llm_prompt.prompt,
+    }
+
 def cmd_explain(args: argparse.Namespace) -> None:
     if args.log_type != "ssh_auth":
         print("Currently, explain is only implemented for ssh_auth logs.")
@@ -62,33 +112,9 @@ def cmd_explain(args: argparse.Namespace) -> None:
     llm_prompt = build_incident_llm_prompt(inc, summary)
 
     if getattr(args, "format", "text") == "json":
-        payload = {
-            "incident": {
-                "incident_id": inc.incident_id,
-                "ip": inc.ip,
-                "severity": inc.severity,
-                "session_ids": inc.session_ids,
-                "total_events": inc.total_events,
-                "avg_anomaly_score": inc.avg_anomaly_score,
-                "auth_failed": inc.auth_failed,
-                "auth_success": inc.auth_success,
-                "auth_fail_ratio": inc.auth_fail_ratio,
-                "first_seen": inc.first_seen.isoformat() if inc.first_seen else None,
-                "last_seen": inc.last_seen.isoformat() if inc.last_seen else None,
-            },
-            "summary": {
-                "title": summary.title,
-                "description": summary.description,
-            },
-            "local_explanation": explanation,
-            "llm_prompt": llm_prompt.prompt,
-        }
+        payload = incident_to_dict(inc, summary, explanation, llm_prompt)
         data = json.dumps(payload, indent=2)
-        if getattr(args, "output", None):
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(data + "\n")
-        else:
-            print(data)
+        write_output(data, getattr(args, "output", None))
         return
     
     if getattr(args, "use_llm", False):
@@ -130,42 +156,12 @@ def cmd_incidents(args: argparse.Namespace) -> None:
             summary = summarize_incident(inc)
             explanation = local_incident_explanation(inc, summary)
             llm_prompt = build_incident_llm_prompt(inc, summary)
-
-            payload.append(
-                {
-                    "incident": {
-                        "incident_id": inc.incident_id,
-                        "ip": inc.ip,
-                        "severity": inc.severity,
-                        "session_ids": inc.session_ids,
-                        "total_events": inc.total_events,
-                        "avg_anomaly_score": inc.avg_anomaly_score,
-                        "auth_failed": inc.auth_failed,
-                        "auth_success": inc.auth_success,
-                        "auth_fail_ratio": inc.auth_fail_ratio,
-                        "first_seen": inc.first_seen.isoformat()
-                        if inc.first_seen
-                        else None,
-                        "last_seen": inc.last_seen.isoformat()
-                        if inc.last_seen
-                        else None,
-                    },
-                    "summary": {
-                        "title": summary.title,
-                        "description": summary.description,
-                    },
-                    "local_explanation": explanation,
-                    "llm_prompt": llm_prompt.prompt,
-                }
-            )
+            payload.append(incident_to_dict(inc, summary, explanation, llm_prompt))
 
         data = json.dumps(payload, indent=2)
-        if getattr(args, "output", None):
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(data + "\n")
-        else:
-            print(data)
+        write_output(data, getattr(args, "output", None))
         return
+    
 
     print(f"Top {len(top)} IP-based incidents:")
     for inc in top:
@@ -232,32 +228,9 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     df_sorted = df.sort_values("anomaly_score", ascending=False)
     top = df_sorted.head(args.top)
     if getattr(args, "format", "text") == "json":
-        payload = []
-        for _, row in top.iterrows():
-            user = row["user"]
-            if user != user:  # NaN check
-                user = None
-
-            ip = row["ip"]
-            if ip != ip:
-                ip = None
-
-            payload.append(
-                {
-                    "session_id": row["session_id"],
-                    "ip": ip,
-                    "user": user,
-                    "event_count": int(row["event_count"]),
-                    "error_ratio": float(row["error_ratio"]),
-                    "anomaly_score": float(row["anomaly_score"]),
-                }
-            )
+        payload = [session_row_to_dict(row) for _, row in top.iterrows()]
         data = json.dumps(payload, indent=2)
-        if getattr(args, "output", None):
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(data + "\n")
-        else:
-            print(data)
+        write_output(data, getattr(args, "output", None))
         return
 
     print(f"Top {len(top)} anomalous sessions:")
