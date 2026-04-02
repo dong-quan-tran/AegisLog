@@ -244,7 +244,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
         )
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="aegislog",
         description="Analyze logs, detect anomalous sessions, group SSH incidents, and generate incident explanations.",
@@ -388,7 +388,7 @@ def main() -> None:
     )
     p_explain.set_defaults(func=cmd_explain)
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     args.func(args)
 
 
