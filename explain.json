@@ -1,0 +1,23 @@
+{
+  "incident": {
+    "incident_id": "ip:59.63.188.30#1069",
+    "ip": "59.63.188.30",
+    "severity": "high",
+    "session_ids": [
+      "59.63.188.30||17488"
+    ],
+    "total_events": 57539,
+    "avg_anomaly_score": 0.29386172386700116,
+    "auth_failed": 28766,
+    "auth_success": 0,
+    "auth_fail_ratio": 1.0,
+    "first_seen": "2005-01-03T10:07:04",
+    "last_seen": "2005-01-05T12:22:59"
+  },
+  "summary": {
+    "title": "High severity SSH incident from 59.63.188.30",
+    "description": "IP 59.63.188.30 generated 57539 SSH log events across 1 session(s), with 28766 failed SSH authentication attempts and no successes. Authentication failure ratio is 1.00 and the average anomaly score is 0.294. This pattern is consistent with SSH brute-force or password-spraying activity. This activity was observed between 2005-01-03T10:07:04 and 2005-01-05T12:22:59. Recommended actions: Block or rate-limit SSH access from source IP 59.63.188.30 at the firewall or perimeter.; Review authentication logs for the targeted accounts to confirm no unauthorized access occurred.."
+  },
+  "local_explanation": "This appears to be a high severity SSH incident from 59.63.188.30, with 28766 failed and 0 successful authentication attempts across 1 session(s). The activity occurred between 2005-01-03T10:07:04 and 2005-01-05T12:22:59. The pattern of many failures and no successes is consistent with SSH brute-force or password-spraying activity. Recommended next steps include: Block or rate-limit SSH access from source IP 59.63.188.30 at the firewall or perimeter.; Review authentication logs for the targeted accounts to confirm no unauthorized access occurred..",
+  "llm_prompt": "You are a security analyst AI assistant.\n\nYou are investigating a suspicious SSH security incident.\n\nHere is structured information about the incident:\n\n- Incident ID: ip:59.63.188.30#1069\n- Source IP: 59.63.188.30\n- Severity: high\n- Total SSH log events: 57539\n- Number of SSH sessions: 1\n- Failed authentication attempts: 28766\n- Successful authentication attempts: 0\n- Authentication failure ratio: 1.00\n- Average anomaly score: 0.294\n- First seen: 2005-01-03T10:07:04\n- Last seen: 2005-01-05T12:22:59\nHere are preliminary, rule-based recommended actions:\n- Block or rate-limit SSH access from source IP 59.63.188.30 at the firewall or perimeter.\n- Review authentication logs for the targeted accounts to confirm no unauthorized access occurred.\n\nHere is an existing summary of the incident:\n\nTitle: High severity SSH incident from 59.63.188.30\nDescription: IP 59.63.188.30 generated 57539 SSH log events across 1 session(s), with 28766 failed SSH authentication attempts and no successes. Authentication failure ratio is 1.00 and the average anomaly score is 0.294. This pattern is consistent with SSH brute-force or password-spraying activity. This activity was observed between 2005-01-03T10:07:04 and 2005-01-05T12:22:59. Recommended actions: Block or rate-limit SSH access from source IP 59.63.188.30 at the firewall or perimeter.; Review authentication logs for the targeted accounts to confirm no unauthorized access occurred..\n\nTask:\n1. Briefly explain what is happening in this incident in 2\u20133 sentences.\n2. Indicate whether the pattern is consistent with SSH brute-force or password-spraying activity.\n3. Suggest one or two high-level next steps an on-call engineer or SOC analyst should consider.\n\nUse clear, concise language suitable for a junior security engineer."
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "session_id": "||0",
+    "ip": NaN,
+    "user": NaN,
+    "event_count": 8,
+    "error_ratio": 0.0,
+    "anomaly_score": -0.0
+  },
+  {
+    "session_id": "||1",
+    "ip": NaN,
+    "user": NaN,
+    "event_count": 3,
+    "error_ratio": 0.0,
+    "anomaly_score": -0.0
+  },
+  {
+    "session_id": "||2",
+    "ip": NaN,
+    "user": NaN,
+    "event_count": 5,
+    "error_ratio": 0.0,
+    "anomaly_score": -0.0
+  }
+]

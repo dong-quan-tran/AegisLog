@@ -422,3 +422,46 @@
 - Add basic unit/integration tests for `incidents --format json` and `explain --format json` to guard against regressions.
 
 ![alt text](image-8.png)
+
+
+## 2026-04-01
+
+**Focus:** AegisLog CLI improvements, structured output consistency, and maintainability.
+
+### Completed
+- Added JSON output support to the `analyze` command with `--format json`.
+- Added optional file output support to `analyze` via `--output`, allowing JSON results to be written directly to disk.
+- Fixed JSON serialization for `analyze` so missing values like `NaN` are normalized to proper JSON `null`.
+- Added optional file output support to `incidents --format json` via `--output`.
+- Added optional file output support to `explain --format json` via `--output`.
+- Improved top-level CLI help output with a clearer description and example commands.
+- Refactored repeated JSON serialization and output-writing logic into reusable helpers in `cli.py`.
+
+### Verified
+- Confirmed `analyze --format json --output analyze.json` works with SSH logs and produces structured session output.
+- Confirmed `incidents --format json --output incidents.json` writes complete incident bundles, including summaries, local explanations, and LLM prompts.
+- Confirmed `explain --format json --output explain.json` writes a single-incident explanation bundle correctly.
+- Confirmed `python -m aegislog.cli -h`, `analyze -h`, `incidents -h`, and `explain -h` display the updated help text as expected.
+
+### Notes
+- `analyze` initially failed with `--format json` because the parser option had not yet been added to `p_analyze`; this was fixed by wiring the flag into argparse.
+- A `payload is not defined` error occurred when JSON writing logic was placed in `main()` instead of inside the command handler; this was fixed by moving output handling into the appropriate command functions.
+- SSH analysis output showed `user: null`, which is now valid JSON and preferable to raw `NaN`.
+
+### Commits made
+- Added output file support to `analyze` JSON output.
+- Normalized NaN fields to null in `analyze` JSON output.
+- Added output file support to `incidents` JSON output.
+- Added output file support to `explain` JSON output.
+- Improved CLI help text and examples.
+- Refactored CLI JSON serialization helpers.
+
+![alt text](image-9.png)
+
+![alt text](image-10.png)
+
+### Next ideas
+- Add tests for CLI JSON helper functions and output-writing behavior.
+- Add integration-style tests for `analyze`, `incidents`, and `explain` JSON modes.
+- Consider adding `--output` support to future structured-output commands by default for consistency.
+
