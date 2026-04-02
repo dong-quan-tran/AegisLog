@@ -227,6 +227,14 @@ def cmd_analyze(args: argparse.Namespace) -> None:
 
     df_sorted = df.sort_values("anomaly_score", ascending=False)
     top = df_sorted.head(args.top)
+    if getattr(args, "profile", None) == "apache":
+        args.log_type = "apache_error"
+        if not args.model_path:
+            args.model_path = "models/log_anomaly_iforest.joblib"
+    elif getattr(args, "profile", None) == "ssh":
+        args.log_type = "ssh_auth"
+        if not args.model_path:
+            args.model_path = "models/log_anomaly_iforest_ssh.joblib"
     if getattr(args, "format", "text") == "json":
         payload = [session_row_to_dict(row) for _, row in top.iterrows()]
         data = json.dumps(payload, indent=2)
@@ -301,6 +309,11 @@ def main(argv: list[str] | None = None) -> None:
     p_analyze.add_argument(
         "--output",
         help="Optional path to write JSON output instead of stdout.",
+    )
+    p_analyze.add_argument(
+        "--profile",
+        choices=["apache", "ssh"],
+        help="Shortcut to set common log-type/model-path combos (apache, ssh).",
     )
     p_analyze.set_defaults(func=cmd_analyze)
 
