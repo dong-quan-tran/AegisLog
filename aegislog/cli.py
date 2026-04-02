@@ -217,7 +217,12 @@ def cmd_analyze(args: argparse.Namespace) -> None:
         events = parse_error_file(args.log_path)
     else:
         events = parse_ssh_file(args.log_path)
-
+    
+    if args.model_path is None:
+        if args.log_type == "ssh_auth":
+            args.model_path = "models/log_anomaly_iforest_ssh.joblib"
+        else:
+            args.model_path = "models/log_anomaly_iforest.joblib"
     sessions = build_sessions(events)
     df = score_sessions(sessions, model_path=args.model_path)
 
@@ -285,8 +290,8 @@ def main(argv: list[str] | None = None) -> None:
     p_analyze.add_argument("log_path", help="Path to log file.")
     p_analyze.add_argument(
         "--model-path",
-        default="models/log_anomaly_iforest.joblib",
-        help="Path to trained model.",
+        default=None,
+        help="Path to trained model (defaults depend on log-type/profile).",
     )
     p_analyze.add_argument(
         "--log-type",
