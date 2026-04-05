@@ -1,10 +1,7 @@
 from dataclasses import dataclass
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timedelta
+from typing import Iterable, List, Optional
 
-from datetime import timedelta
-
-from typing import Iterable
 
 @dataclass
 class LogEvent:
@@ -18,6 +15,7 @@ class LogEvent:
     raw: str
     source: str  # "access" | "auth" | ...
 
+
 @dataclass
 class Session:
     session_id: str
@@ -25,6 +23,9 @@ class Session:
     user: Optional[str]
     user_agent: Optional[str]
     events: List[LogEvent]
+    start_time: datetime
+    end_time: datetime
+    source_set: set[str]
 
 
 def build_sessions(events: Iterable[LogEvent], gap_minutes: int = 30) -> list[Session]:
@@ -44,15 +45,16 @@ def build_sessions(events: Iterable[LogEvent], gap_minutes: int = 30) -> list[Se
         if not current or current_key is None:
             return
         ip, user, ua = current_key
-        first_ts = current[0].timestamp.isoformat()
-        # Use a stable, readable ID: ip||user||first_timestamp
-        session_id = f"{ip or ''}||{user or ''}||{first_ts}"
+        session_id = f"{ip or ''}||{user or ''}||{current[0].timestamp.isoformat()}"
         sessions.append(Session(
             session_id=session_id,
             ip=ip or None,
             user=user or None,
             user_agent=ua or None,
             events=current,
+            start_time=current[0].timestamp,
+            end_time=current[-1].timestamp,
+            source_set={ev.source for ev in current if ev.source},
         ))
         current = []
         current_key = None
