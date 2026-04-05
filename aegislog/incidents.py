@@ -1,6 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -138,9 +138,11 @@ def group_sessions_to_incidents(
     sessions: List[Session],
     scores_df: pd.DataFrame,
     min_sessions: int = 1,
+    merge_window_minutes: int = 60,
 ) -> List[Incident]:
     by_key: Dict[tuple[str, str], List[dict]] = defaultdict(list)
     session_by_id: Dict[str, Session] = {s.session_id: s for s in sessions}
+    merge_window = timedelta(minutes=merge_window_minutes)
 
     for _, row in scores_df.iterrows():
         ip = row["ip"]
@@ -152,6 +154,10 @@ def group_sessions_to_incidents(
         user_key = user if isinstance(user, str) and user else ""
         incident_key = (ip, user_key)
 
+        sess = session_by_id.get(row["session_id"])
+        if not sess:
+            continue
+
         by_key[incident_key].append(
             {
                 "session_id": row["session_id"],
@@ -159,59 +165,70 @@ def group_sessions_to_incidents(
                 "anomaly_score": row["anomaly_score"],
                 "auth_failed": row.get("auth_failed", 0),
                 "auth_success": row.get("auth_success", 0),
+                "start_time": sess.start_time,
+                "end_time": sess.end_time,
             }
         )
 
     incidents: List[Incident] = []
 
-    for idx, ((ip, user_key), sess_list) in enumerate(by_key.items()):
-        if len(sess_list) < min_sessions:
-            continue
+    for (ip, user_key), sess_list in by_key.items():
+        sess_list.sort(key=lambda s: s["start_time"])
 
-        total_events = sum(s["event_count"] for s in sess_list)
-        avg_score = (
-            sum(s["anomaly_score"] for s in sess_list) / len(sess_list)
-            if sess_list
-            else 0.0
-        )
-        total_failed = sum(s["auth_failed"] for s in sess_list)
-        total_success = sum(s["auth_success"] for s in sess_list)
-        auth_total = total_failed + total_success
-        auth_fail_ratio = total_failed / auth_total if auth_total else 0.0
+        clusters: List[List[dict]] = []
+        current_cluster: List[dict] = []
 
-        timestamps: List[datetime] = []
-        session_ids: List[str] = []
-
-        for s in sess_list:
-            session_ids.append(s["session_id"])
-            sess = session_by_id.get(s["session_id"])
-            if not sess:
+        for sess_info in sess_list:
+            if not current_cluster:
+                current_cluster = [sess_info]
                 continue
-            timestamps.append(sess.start_time)
-            timestamps.append(sess.end_time)
 
-        first_seen = min(timestamps) if timestamps else None
-        last_seen = max(timestamps) if timestamps else None
+            last_end = current_cluster[-1]["end_time"]
+            if sess_info["start_time"] - last_end <= merge_window:
+                current_cluster.append(sess_info)
+            else:
+                clusters.append(current_cluster)
+                current_cluster = [sess_info]
 
-        severity = _compute_severity(avg_score, total_failed, auth_fail_ratio)
-        suffix = f"{ip}|{user_key}" if user_key else ip
-        incident_id = f"principal:{suffix}#{idx}"
+        if current_cluster:
+            clusters.append(current_cluster)
 
-        incidents.append(
-            Incident(
-                incident_id=incident_id,
-                ip=ip,
-                session_ids=session_ids,
-                total_events=total_events,
-                avg_anomaly_score=avg_score,
-                auth_failed=total_failed,
-                auth_success=total_success,
-                auth_fail_ratio=auth_fail_ratio,
-                severity=severity,
-                first_seen=first_seen,
-                last_seen=last_seen,
+        for cluster_idx, cluster in enumerate(clusters):
+            if len(cluster) < min_sessions:
+                continue
+
+            total_events = sum(s["event_count"] for s in cluster)
+            avg_score = sum(s["anomaly_score"] for s in cluster) / len(cluster)
+            total_failed = sum(s["auth_failed"] for s in cluster)
+            total_success = sum(s["auth_success"] for s in cluster)
+            auth_total = total_failed + total_success
+            auth_fail_ratio = total_failed / auth_total if auth_total else 0.0
+
+            session_ids = [s["session_id"] for s in cluster]
+            timestamps = [s["start_time"] for s in cluster] + [s["end_time"] for s in cluster]
+
+            first_seen = min(timestamps) if timestamps else None
+            last_seen = max(timestamps) if timestamps else None
+
+            severity = _compute_severity(avg_score, total_failed, auth_fail_ratio)
+            suffix = f"{ip}|{user_key}" if user_key else ip
+            incident_id = f"principal:{suffix}#{cluster_idx}"
+
+            incidents.append(
+                Incident(
+                    incident_id=incident_id,
+                    ip=ip,
+                    session_ids=session_ids,
+                    total_events=total_events,
+                    avg_anomaly_score=avg_score,
+                    auth_failed=total_failed,
+                    auth_success=total_success,
+                    auth_fail_ratio=auth_fail_ratio,
+                    severity=severity,
+                    first_seen=first_seen,
+                    last_seen=last_seen,
+                )
             )
-        )
 
     incidents.sort(key=lambda inc: inc.avg_anomaly_score, reverse=True)
     return incidents
