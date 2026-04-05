@@ -119,10 +119,18 @@ def _compute_severity(
     auth_failed: int,
     auth_fail_ratio: float,
 ) -> str:
-    if auth_failed >= 1000 and auth_fail_ratio >= 0.9 and avg_anomaly_score >= 0.25:
+    # Strong brute-force signal and highly anomalous behavior
+    if avg_anomaly_score >= 0.35 and auth_failed >= 500 and auth_fail_ratio >= 0.95:
         return "high"
-    if auth_failed >= 200 and auth_fail_ratio >= 0.7 and avg_anomaly_score >= 0.15:
+
+    # Clear suspicious authentication pattern with elevated anomaly score
+    if avg_anomaly_score >= 0.25 and auth_failed >= 200 and auth_fail_ratio >= 0.90:
+        return "high"
+
+    # Suspicious but lower-volume activity
+    if avg_anomaly_score >= 0.15 and auth_failed >= 50 and auth_fail_ratio >= 0.70:
         return "medium"
+
     return "low"
 
 
