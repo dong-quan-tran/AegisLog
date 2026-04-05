@@ -6,7 +6,7 @@ from aegislog.parsing.auth_ssh import parse_ssh_file
 from aegislog.features.sessions import build_sessions
 from aegislog.ml.pipeline import score_sessions
 from aegislog.incidents import (
-    group_sessions_by_ip,
+    group_sessions_to_incidents,
     summarize_incident,
 )
 from aegislog.ai import (
@@ -80,7 +80,7 @@ def cmd_explain(args: argparse.Namespace) -> None:
         print("No sessions found.")
         return
 
-    incidents = group_sessions_by_ip(sessions, df)
+    incidents = group_sessions_to_incidents(sessions, df)
     if not incidents:
         print("No incidents found.")
         return
@@ -147,7 +147,7 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         print("No sessions found.")
         return
 
-    incidents = group_sessions_by_ip(sessions, df)
+    incidents = group_sessions_to_incidents(sessions, df)
     top = incidents[: args.top]
 
     if getattr(args, "format", "text") == "json":

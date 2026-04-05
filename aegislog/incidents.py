@@ -134,19 +134,25 @@ def _compute_severity(
     return "low"
 
 
-def group_sessions_by_ip(
+def group_sessions_to_incidents(
     sessions: List[Session],
     scores_df: pd.DataFrame,
     min_sessions: int = 1,
 ) -> List[Incident]:
-    by_ip: Dict[str, List[dict]] = defaultdict(list)
+    by_key: Dict[tuple[str, str], List[dict]] = defaultdict(list)
     session_by_id: Dict[str, Session] = {s.session_id: s for s in sessions}
 
     for _, row in scores_df.iterrows():
         ip = row["ip"]
+        user = row.get("user")
+
         if not isinstance(ip, str) or not ip:
             continue
-        by_ip[ip].append(
+
+        user_key = user if isinstance(user, str) and user else ""
+        incident_key = (ip, user_key)
+
+        by_key[incident_key].append(
             {
                 "session_id": row["session_id"],
                 "event_count": row["event_count"],
@@ -158,7 +164,7 @@ def group_sessions_by_ip(
 
     incidents: List[Incident] = []
 
-    for idx, (ip, sess_list) in enumerate(by_ip.items()):
+    for idx, ((ip, user_key), sess_list) in enumerate(by_key.items()):
         if len(sess_list) < min_sessions:
             continue
 
@@ -174,26 +180,28 @@ def group_sessions_by_ip(
         auth_fail_ratio = total_failed / auth_total if auth_total else 0.0
 
         timestamps: List[datetime] = []
+        session_ids: List[str] = []
+
         for s in sess_list:
+            session_ids.append(s["session_id"])
             sess = session_by_id.get(s["session_id"])
             if not sess:
                 continue
-            for ev in sess.events:
-                ts = getattr(ev, "timestamp", None)
-                if ts is not None:
-                    timestamps.append(ts)
+            timestamps.append(sess.start_time)
+            timestamps.append(sess.end_time)
 
         first_seen = min(timestamps) if timestamps else None
         last_seen = max(timestamps) if timestamps else None
 
         severity = _compute_severity(avg_score, total_failed, auth_fail_ratio)
-        incident_id = f"ip:{ip}#{idx}"
+        suffix = f"{ip}|{user_key}" if user_key else ip
+        incident_id = f"principal:{suffix}#{idx}"
 
         incidents.append(
             Incident(
                 incident_id=incident_id,
                 ip=ip,
-                session_ids=[s["session_id"] for s in sess_list],
+                session_ids=session_ids,
                 total_events=total_events,
                 avg_anomaly_score=avg_score,
                 auth_failed=total_failed,
