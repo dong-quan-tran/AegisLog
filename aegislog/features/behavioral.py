@@ -24,11 +24,14 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
         notice_events = level_counts.get("notice", 0)
         error_event_ratio = error_events / total if total else 0.0
 
-        # New SSH auth features based on status codes
+        # SSH auth features based on status codes
         auth_failed = sum(1 for c in statuses if c == 401)
         auth_success = sum(1 for c in statuses if c == 200)
         auth_total = auth_failed + auth_success
         auth_fail_ratio = auth_failed / auth_total if auth_total else 0.0
+
+        avg_events_per_second = total / max(duration, 1)
+        unique_paths = len({ev.path for ev in s.events if ev.path})
 
         rows.append(
             {
@@ -46,6 +49,8 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
                 "auth_failed": auth_failed,
                 "auth_success": auth_success,
                 "auth_fail_ratio": auth_fail_ratio,
+                "avg_events_per_second": avg_events_per_second,
+                "unique_paths": unique_paths,
             }
         )
     return pd.DataFrame(rows)
