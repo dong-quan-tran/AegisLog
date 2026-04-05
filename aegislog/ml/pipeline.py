@@ -25,6 +25,8 @@ NUMERIC_FEATURES = [
     "auth_fail_ratio",
     "avg_events_per_second",
     "unique_paths",
+    "source_count",
+    "has_mixed_sources",
 ]
 
 
