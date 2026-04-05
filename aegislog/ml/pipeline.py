@@ -23,6 +23,8 @@ NUMERIC_FEATURES = [
     "auth_failed",
     "auth_success",
     "auth_fail_ratio",
+    "avg_events_per_second",
+    "unique_paths",
 ]
 
 
