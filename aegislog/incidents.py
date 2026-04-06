@@ -18,7 +18,8 @@ class Incident:
     auth_failed: int
     auth_success: int
     auth_fail_ratio: float
-    severity: str  # e.g. "low" | "medium" | "high"
+    has_success_after_failures: bool
+    severity: str
     first_seen: Optional[datetime]
     last_seen: Optional[datetime]
 
@@ -76,7 +77,12 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
     else:
         auth_phrase = "no SSH authentication activity recorded"
 
-    brute_force_hint = ""
+    compromise_hint = ""
+    if incident.has_success_after_failures:
+        compromise_hint = (
+            " Failed authentication activity was followed by one or more successful logins, "
+            "which may indicate a successful brute-force attempt or account compromise."
+        )
     if (
         incident.auth_failed >= 100
         and incident.auth_success == 0
@@ -100,6 +106,7 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
         f"Authentication failure ratio is {incident.auth_fail_ratio:.2f} and the "
         f"average anomaly score is {incident.avg_anomaly_score:.3f}."
         f"{brute_force_hint}"
+        f"{compromise_hint}"
         f"{time_phrase}"
     )
 
@@ -118,7 +125,11 @@ def _compute_severity(
     avg_anomaly_score: float,
     auth_failed: int,
     auth_fail_ratio: float,
+    has_success_after_failures: bool = False,
 ) -> str:
+    if has_success_after_failures and avg_anomaly_score >= 0.20 and auth_failed >= 20:
+        return "high"
+
     # Strong brute-force signal and highly anomalous behavior
     if avg_anomaly_score >= 0.35 and auth_failed >= 500 and auth_fail_ratio >= 0.95:
         return "high"
@@ -204,13 +215,21 @@ def group_sessions_to_incidents(
             auth_total = total_failed + total_success
             auth_fail_ratio = total_failed / auth_total if auth_total else 0.0
 
+
+            has_success_after_failures = total_failed > 0 and total_success > 0
+            
             session_ids = [s["session_id"] for s in cluster]
             timestamps = [s["start_time"] for s in cluster] + [s["end_time"] for s in cluster]
 
             first_seen = min(timestamps) if timestamps else None
             last_seen = max(timestamps) if timestamps else None
 
-            severity = _compute_severity(avg_score, total_failed, auth_fail_ratio)
+            severity = _compute_severity(
+                avg_score,
+                total_failed,
+                auth_fail_ratio,
+                has_success_after_failures,
+            )
             suffix = f"{ip}|{user_key}" if user_key else ip
             incident_id = f"principal:{suffix}#{cluster_idx}"
 
