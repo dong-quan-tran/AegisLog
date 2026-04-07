@@ -44,6 +44,28 @@ def session_row_to_dict(row) -> dict:
     }
 
 
+def resolve_model_path(args) -> str:
+    if args.model_path:
+        return args.model_path
+
+    # Defaults per model/log-type combo
+    if args.model_type == "iforest":
+        if args.log_type == "ssh_auth":
+            return "models/log_anomaly_iforest_ssh.joblib"
+        else:
+            return "models/log_anomaly_iforest_apache.joblib"
+    if args.model_type == "ocsvm":
+        if args.log_type == "ssh_auth":
+            return "models/log_anomaly_ocsvm_ssh.joblib"
+        else:
+            return "models/log_anomaly_ocsvm_apache.joblib"
+    # lof
+    if args.log_type == "ssh_auth":
+        return "models/log_anomaly_lof_ssh.joblib"
+    else:
+        return "models/log_anomaly_lof_apache.joblib"
+
+
 def incident_to_dict(inc, summary, explanation, llm_prompt) -> dict:
     return {
         "incident": {
@@ -74,7 +96,8 @@ def cmd_explain(args: argparse.Namespace) -> None:
 
     events = parse_ssh_file(args.log_path)
     sessions = build_sessions(events)
-    df = score_sessions(sessions, model_path=args.model_path)
+    model_path = resolve_model_path(args)
+    df = score_sessions(sessions, model_path=model_path)
 
     if df.empty:
         print("No sessions found.")
@@ -141,7 +164,8 @@ def cmd_incidents(args: argparse.Namespace) -> None:
 
     events = parse_ssh_file(args.log_path)
     sessions = build_sessions(events)
-    df = score_sessions(sessions, model_path=args.model_path)
+    model_path = resolve_model_path(args)
+    df = score_sessions(sessions, model_path=model_path)
 
     if df.empty:
         print("No sessions found.")
@@ -222,14 +246,21 @@ def cmd_analyze(args: argparse.Namespace) -> None:
         events = parse_error_file(args.log_path)
     else:
         events = parse_ssh_file(args.log_path)
-    
-    if args.model_path is None:
-        if args.log_type == "ssh_auth":
+
+    # Apply profile shortcuts first, if any
+    if getattr(args, "profile", None) == "apache":
+        args.log_type = "apache_error"
+        if args.model_path is None:
+            args.model_path = "models/log_anomaly_iforest_apache.joblib"
+    elif getattr(args, "profile", None) == "ssh":
+        args.log_type = "ssh_auth"
+        if args.model_path is None:
             args.model_path = "models/log_anomaly_iforest_ssh.joblib"
-        else:
-            args.model_path = "models/log_anomaly_iforest.joblib"
+
+    model_path = resolve_model_path(args)
+
     sessions = build_sessions(events)
-    df = score_sessions(sessions, model_path=args.model_path)
+    df = score_sessions(sessions, model_path=model_path)
 
     if df.empty:
         print("No sessions found.")
@@ -237,14 +268,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
 
     df_sorted = df.sort_values("anomaly_score", ascending=False)
     top = df_sorted.head(args.top)
-    if getattr(args, "profile", None) == "apache":
-        args.log_type = "apache_error"
-        if not args.model_path:
-            args.model_path = "models/log_anomaly_iforest.joblib"
-    elif getattr(args, "profile", None) == "ssh":
-        args.log_type = "ssh_auth"
-        if not args.model_path:
-            args.model_path = "models/log_anomaly_iforest_ssh.joblib"
+
     if getattr(args, "format", "text") == "json":
         payload = [session_row_to_dict(row) for _, row in top.iterrows()]
         data = json.dumps(payload, indent=2)
@@ -328,6 +352,12 @@ def main(argv: list[str] | None = None) -> None:
         choices=["apache", "ssh"],
         help="Shortcut to set common log-type/model-path combos (apache, ssh).",
     )
+    p_analyze.add_argument(
+        "--model-type",
+        choices=["iforest", "ocsvm", "lof"],
+        default="iforest",
+        help="Anomaly model to use for scoring.",
+    )
     p_analyze.set_defaults(func=cmd_analyze)
 
     p_incidents = subparsers.add_parser(
@@ -371,6 +401,12 @@ def main(argv: list[str] | None = None) -> None:
         "--output",
         help="Optional path to write JSON output instead of stdout.",
     )
+    p_incidents.add_argument(
+        "--model-type",
+        choices=["iforest", "ocsvm", "lof"],
+        default="iforest",
+        help="Anomaly model to use for scoring.",
+    )
     p_incidents.set_defaults(func=cmd_incidents)
 
     p_explain = subparsers.add_parser(
@@ -411,6 +447,12 @@ def main(argv: list[str] | None = None) -> None:
     p_explain.add_argument(
         "--output",
         help="Optional path to write JSON output instead of stdout.",
+    )
+    p_explain.add_argument(
+        "--model-type",
+        choices=["iforest", "ocsvm", "lof"],
+        default="iforest",
+        help="Anomaly model to use for scoring.",
     )
     p_explain.set_defaults(func=cmd_explain)
 
