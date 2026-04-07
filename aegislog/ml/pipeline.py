@@ -11,6 +11,10 @@ from pathlib import Path
 from aegislog.features.sessions import Session
 from aegislog.features.behavioral import sessions_to_features
 
+MODEL_VERSION = "iforest-v2"
+MODEL_FILENAME = f"log_anomaly_{MODEL_VERSION}.joblib"
+MODEL_PATH = f"models/{MODEL_FILENAME}"
+
 NUMERIC_FEATURES = [
     "event_count",
     "duration_seconds",
@@ -43,13 +47,13 @@ def build_pipeline(contamination: float = 0.05) -> Pipeline:
     return Pipeline([("preprocess", pre), ("model", model)])
 
 
-def load_model(model_path: str = "models/log_anomaly_iforest.joblib"):
+def load_model(model_path: str = MODEL_PATH):
     return joblib.load(model_path)
 
 
 def score_sessions(
     sessions: List[Session],
-    model_path: str = "models/log_anomaly_iforest.joblib",
+    model_path: str = MODEL_PATH,
 ) -> pd.DataFrame:
     model = load_model(model_path)
     df = sessions_to_features(sessions)
@@ -60,3 +64,6 @@ def score_sessions(
     scores = model.decision_function(df)
     df["anomaly_score"] = -scores  # invert so higher = more anomalous
     return df
+
+def get_model_version() -> str:
+    return MODEL_VERSION
