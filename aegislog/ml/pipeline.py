@@ -2,6 +2,8 @@ from sklearn.ensemble import IsolationForest
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
+from sklearn.svm import OneClassSVM 
+from sklearn.neighbors import LocalOutlierFactor
 
 from typing import List, Tuple
 import pandas as pd
@@ -32,6 +34,37 @@ NUMERIC_FEATURES = [
     "source_count",
     "has_mixed_sources",
 ]
+
+def build_ocsvm_pipeline(
+    nu: float = 0.05,
+    gamma: str | float = "scale",
+) -> Pipeline:
+    pre = ColumnTransformer(
+        [("num", StandardScaler(), NUMERIC_FEATURES)],
+        remainder="drop",
+    )
+    model = OneClassSVM(
+        kernel="rbf",
+        nu=nu,
+        gamma=gamma,
+    )
+    return Pipeline([("preprocess", pre), ("model", model)])
+
+
+def build_lof_pipeline(
+    n_neighbors: int = 20,
+    contamination: float = 0.05,
+) -> Pipeline:
+    pre = ColumnTransformer(
+        [("num", StandardScaler(), NUMERIC_FEATURES)],
+        remainder="drop",
+    )
+    model = LocalOutlierFactor(
+        n_neighbors=n_neighbors,
+        contamination=contamination,
+        novelty=True,  # important for using on new data
+    )
+    return Pipeline([("preprocess", pre), ("model", model)])
 
 
 def build_pipeline(contamination: float = 0.05) -> Pipeline:
