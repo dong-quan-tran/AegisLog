@@ -510,3 +510,60 @@
 - `Group incidents by IP and user context instead of IP alone`
 - `Add time-window incident merging for related sessions`
 - `Flag incidents with successful logins after failed auth attempts`
+
+
+### Progress log: 04/06/2026
+
+Model and pipeline structure
+Added model versioning to the IsolationForest pipeline via MODEL_VERSION, MODEL_FILENAME, and MODEL_PATH constants, and updated load_model / score_sessions to use the versioned path by default.
+
+Extended aegislog/ml/pipeline.py with two additional anomaly detection pipelines using the same feature set:
+
+build_ocsvm_pipeline(...) using One-Class SVM (RBF kernel) for novelty detection.
+
+build_lof_pipeline(...) using Local Outlier Factor in novelty=True mode for density-based anomalies.
+
+Ensured all pipelines share the same NUMERIC_FEATURES and preprocessing (ColumnTransformer + StandardScaler), so models are directly comparable on identical session features.
+
+Training script enhancements
+Updated aegislog/ml/train.py to:
+
+Import and use MODEL_PATH and NUMERIC_FEATURES from the pipeline module.
+
+Add a --model-type flag with choices iforest, ocsvm, and lof to select which anomaly model to train.
+
+Select the appropriate builder (build_pipeline, build_ocsvm_pipeline, build_lof_pipeline) based on --model-type.
+
+Fit models explicitly on df[NUMERIC_FEATURES] instead of the whole DataFrame, aligning training with the pipeline’s expected feature schema.
+
+Verified training paths:
+
+Retrained the IsolationForest SSH model with:
+
+python -m aegislog.ml.train --logs-path data/loghub/SSH.log --log-type ssh_auth --model-type iforest --model-path models/log_anomaly_iforest_ssh.joblib
+
+Trained One-Class SVM and LOF variants on the same SSH data using:
+
+--model-type ocsvm → models/log_anomaly_ocsvm_ssh.joblib
+
+--model-type lof → models/log_anomaly_lof_ssh.joblib
+
+Incident logic fixes and compatibility
+Fixed Incident construction after adding has_success_after_failures and user:
+
+Ensured group_sessions_to_incidents(...) passes has_success_after_failures and user into the Incident dataclass, resolving constructor errors during pytest.
+
+Restored CLI compatibility for incident IDs:
+
+Adjusted incident_id format back to an ip: prefix (e.g. ip:59.63.188.30#0 or ip:59.63.188.30|alice#0) so existing tests expecting incident_id.startswith("ip:") continue to pass, while still embedding user context in the suffix. 
+
+Testing and tooling
+Ran pytest, iterated on:
+
+Fixing Incident.__init__ missing argument errors.
+
+Fixing incident ID format to satisfy integration tests.
+
+Confirmed training scripts and module invocation patterns:
+
+Use python -m aegislog.ml.train ... from the repo root with actual log paths under data/loghub/.
