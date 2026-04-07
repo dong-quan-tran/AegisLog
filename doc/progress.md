@@ -465,3 +465,48 @@
 - Add integration-style tests for `analyze`, `incidents`, and `explain` JSON modes.
 - Consider adding `--output` support to future structured-output commands by default for consistency.
 
+### Progress log: 04/05/2026
+
+## Session structure and building
+- Extended `Session` to include `start_time`, `end_time`, and `source_set` so each session has explicit time bounds and source metadata.  
+- Updated `build_sessions()` to:
+  - Use a stable, timestamp-based `session_id` format.
+  - Populate `start_time`, `end_time`, and `source_set` when flushing sessions.
+
+## Behavioral features and model inputs
+- Updated `sessions_to_features()` to:
+  - Use `s.start_time`/`s.end_time` instead of recomputing from events.
+  - Fix variable name bugs in `avg_events_per_second` and `unique_paths`.
+  - Add new features:
+    - `avg_events_per_second`
+    - `unique_paths`
+    - `source_count`
+    - `has_mixed_sources`
+- Updated `NUMERIC_FEATURES` in `pipeline.py` to include:
+  - `avg_events_per_second`
+  - `unique_paths`
+  - `source_count`
+  - `has_mixed_sources`
+- Note: retraining the IsolationForest model is now required to align with the new feature schema.
+
+## Incident grouping and severity
+- Renamed and refactored incident grouping from IP-only to principal-aware:
+  - New function `group_sessions_to_incidents(...)` groups by `(ip, user)` when possible, falling back to IP only.
+  - Added a `merge_window_minutes` parameter (default 60) and implemented time-window clustering so nearby sessions from the same principal form a single incident.
+- Enhanced `Incident` dataclass:
+  - Added `has_success_after_failures: bool`.
+- Incident logic improvements:
+  - Compute `has_success_after_failures` at cluster level (`auth_failed > 0 and auth_success > 0`).
+  - Extended `_compute_severity(...)` to accept `has_success_after_failures` and treat “failed then successful logins” as a strong high-severity signal under reasonable anomaly/volume thresholds.
+  - Updated severity call sites to pass this flag.
+- Summary and actions:
+  - Added compromise hint text in `summarize_incident(...)` when `has_success_after_failures` is true.
+  - Existing recommended actions still apply, with better context from the new flags and severity logic.
+
+## Commit messages used / suggested
+- `Add avg_events_per_second and unique_paths features to session behavioral vectors`
+- `Update anomaly detection pipeline to include new behavioral features`
+- `Enhance Session model with start/end timestamps and source metadata`
+- `Group incidents by IP and user context instead of IP alone`
+- `Add time-window incident merging for related sessions`
+- `Flag incidents with successful logins after failed auth attempts`
