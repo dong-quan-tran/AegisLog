@@ -12,6 +12,7 @@ from aegislog.features.sessions import Session
 class Incident:
     incident_id: str
     ip: Optional[str]
+    user: Optional[str]
     session_ids: List[str]
     total_events: int
     avg_anomaly_score: float
@@ -130,15 +131,12 @@ def _compute_severity(
     if has_success_after_failures and avg_anomaly_score >= 0.20 and auth_failed >= 20:
         return "high"
 
-    # Strong brute-force signal and highly anomalous behavior
     if avg_anomaly_score >= 0.35 and auth_failed >= 500 and auth_fail_ratio >= 0.95:
         return "high"
 
-    # Clear suspicious authentication pattern with elevated anomaly score
     if avg_anomaly_score >= 0.25 and auth_failed >= 200 and auth_fail_ratio >= 0.90:
         return "high"
 
-    # Suspicious but lower-volume activity
     if avg_anomaly_score >= 0.15 and auth_failed >= 50 and auth_fail_ratio >= 0.70:
         return "medium"
 
@@ -237,6 +235,7 @@ def group_sessions_to_incidents(
                 Incident(
                     incident_id=incident_id,
                     ip=ip,
+                    user=user_key or None,
                     session_ids=session_ids,
                     total_events=total_events,
                     avg_anomaly_score=avg_score,
