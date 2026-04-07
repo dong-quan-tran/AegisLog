@@ -6,7 +6,13 @@ from aegislog.parsing.apache_error import parse_error_file
 from aegislog.parsing.auth_ssh import parse_ssh_file
 from aegislog.features.sessions import build_sessions
 from aegislog.features.behavioral import sessions_to_features
-from aegislog.ml.pipeline import build_pipeline, MODEL_PATH, NUMERIC_FEATURES
+from aegislog.ml.pipeline import (
+    build_pipeline,
+    build_ocsvm_pipeline,
+    build_lof_pipeline,
+    MODEL_PATH,
+    NUMERIC_FEATURES,
+)
 
 
 def main():
@@ -16,6 +22,12 @@ def main():
         "--model-path",
         default=MODEL_PATH,
         help="Where to save the trained model.",
+    )
+    parser.add_argument(
+        "--model-type",
+        choices=["iforest", "ocsvm", "lof"],
+        default="iforest",
+        help="Type of model to train.",
     )
     parser.add_argument(
         "--log-type",
@@ -36,7 +48,13 @@ def main():
     if df.empty:
         raise RuntimeError("No training data was produced from the provided logs.")
 
-    pipeline = build_pipeline()
+    if args.model_type == "iforest":
+        pipeline = build_pipeline()
+    elif args.model_type == "ocsvm":
+        pipeline = build_ocsvm_pipeline()
+    else:  # "lof"
+        pipeline = build_lof_pipeline()
+
     pipeline.fit(df[NUMERIC_FEATURES])
 
     Path(args.model_path).parent.mkdir(parents=True, exist_ok=True)
