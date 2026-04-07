@@ -229,7 +229,7 @@ def group_sessions_to_incidents(
                 has_success_after_failures,
             )
             suffix = f"{ip}|{user_key}" if user_key else ip
-            incident_id = f"principal:{suffix}#{cluster_idx}"
+            incident_id = f"ip:{suffix}#{cluster_idx}"
 
             incidents.append(
                 Incident(
@@ -242,6 +242,7 @@ def group_sessions_to_incidents(
                     auth_failed=total_failed,
                     auth_success=total_success,
                     auth_fail_ratio=auth_fail_ratio,
+                    has_success_after_failures=has_success_after_failures,
                     severity=severity,
                     first_seen=first_seen,
                     last_seen=last_seen,
