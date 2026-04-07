@@ -51,6 +51,54 @@ def build_ocsvm_pipeline(
     return Pipeline([("preprocess", pre), ("model", model)])
 
 
+def _minmax_normalize(series: pd.Series) -> pd.Series:
+    min_val = series.min()
+    max_val = series.max()
+    if pd.isna(min_val) or pd.isna(max_val) or max_val == min_val:
+        return pd.Series([0.0] * len(series), index=series.index)
+    return (series - min_val) / (max_val - min_val)
+
+
+def score_sessions_multi(
+    sessions: List[Session],
+    model_paths: dict[str, str],
+    add_ensemble: bool = True,
+) -> pd.DataFrame:
+    df = sessions_to_features(sessions)
+    if df.empty:
+        return df
+
+    raw_score_columns: list[str] = []
+    normalized_score_columns: list[str] = []
+
+    for model_name, model_path in model_paths.items():
+        model = load_model(model_path)
+        scores = model.decision_function(df)
+
+        # Invert so higher = more anomalous, matching existing convention
+        anomaly_scores = -scores
+
+        raw_col = f"{model_name}_score"
+        norm_col = f"{model_name}_score_norm"
+
+        df[raw_col] = anomaly_scores
+        df[norm_col] = _minmax_normalize(df[raw_col])
+
+        raw_score_columns.append(raw_col)
+        normalized_score_columns.append(norm_col)
+
+    # Keep backward compatibility: if iforest exists, anomaly_score mirrors it
+    if "iforest_score" in df.columns:
+        df["anomaly_score"] = df["iforest_score"]
+    else:
+        df["anomaly_score"] = df[raw_score_columns[0]]
+
+    if add_ensemble and normalized_score_columns:
+        df["ensemble_score"] = df[normalized_score_columns].mean(axis=1)
+
+    return df
+
+
 def build_lof_pipeline(
     n_neighbors: int = 20,
     contamination: float = 0.05,
