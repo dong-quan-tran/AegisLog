@@ -115,6 +115,7 @@ def incident_to_dict(inc, summary, explanation, llm_prompt) -> dict:
             "incident_id": inc.incident_id,
             "ip": inc.ip,
             "severity": inc.severity,
+            "severity_reason": getattr(inc, "severity_reason", None),
             "session_ids": inc.session_ids,
             "total_events": inc.total_events,
             "avg_anomaly_score": inc.avg_anomaly_score,
@@ -272,10 +273,13 @@ def cmd_incidents(args: argparse.Namespace) -> None:
             f"avg_anomaly_score={inc.avg_anomaly_score:.3f}"
         )
 
+        if getattr(inc, "severity_reason", None):
+            print(f"  severity_reason={inc.severity_reason}")
+
         summary = summarize_incident(inc)
         print(f"  summary_title={summary.title}")
         print(f"  summary_description={summary.description}")
-
+        
         if getattr(args, "show_local_explanation", False):
             explanation = local_incident_explanation(inc, summary)
             print("  local_explanation_begin")
