@@ -59,6 +59,20 @@ def _minmax_normalize(series: pd.Series) -> pd.Series:
     return (series - min_val) / (max_val - min_val)
 
 
+def add_threshold_columns(
+    df: pd.DataFrame,
+    score_col: str = "anomaly_score",
+    threshold_percentile: float = 99.0,
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    result = df.copy()
+    result["anomaly_percentile"] = result[score_col].rank(pct=True) * 100.0
+    result["is_anomalous"] = result["anomaly_percentile"] >= threshold_percentile
+    return result
+
+
 def score_sessions_multi(
     sessions: List[Session],
     model_paths: dict[str, str],
