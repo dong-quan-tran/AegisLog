@@ -27,6 +27,19 @@ class Incident:
 
 
 @dataclass
+class IncidentTimelineEntry:
+    timestamp: Optional[datetime]
+    session_id: str
+    ip: Optional[str]
+    user: Optional[str]
+    auth_failed: int
+    auth_success: int
+    event_count: int
+    anomaly_score: float
+    event_type: str
+
+
+@dataclass
 class IncidentSummary:
     incident_id: str
     title: str
@@ -164,6 +177,57 @@ def _severity_reason(
         return "moderate failed-auth volume with elevated anomaly score"
 
     return "limited authentication activity and anomaly score"
+
+
+def build_incident_timeline(
+    incident: Incident,
+    sessions: List[Session],
+    scores_df: pd.DataFrame,
+) -> List[IncidentTimelineEntry]:
+    session_by_id: Dict[str, Session] = {s.session_id: s for s in sessions}
+    rows = scores_df[scores_df["session_id"].isin(incident.session_ids)]
+
+    timeline: List[IncidentTimelineEntry] = []
+
+    for _, row in rows.iterrows():
+        sess = session_by_id.get(row["session_id"])
+        if not sess:
+            continue
+
+        auth_failed = int(row.get("auth_failed", 0))
+        auth_success = int(row.get("auth_success", 0))
+
+        if auth_success > 0 and auth_failed > 0:
+            event_type = "failures_then_success"
+        elif auth_success > 0:
+            event_type = "success"
+        elif auth_failed > 0:
+            event_type = "failure"
+        else:
+            event_type = "session"
+
+        timeline.append(
+            IncidentTimelineEntry(
+                timestamp=sess.start_time,
+                session_id=row["session_id"],
+                ip=row.get("ip"),
+                user=row.get("user"),
+                auth_failed=auth_failed,
+                auth_success=auth_success,
+                event_count=int(row["event_count"]),
+                anomaly_score=float(row["anomaly_score"]),
+                event_type=event_type,
+            )
+        )
+
+    timeline.sort(
+        key=lambda entry: (
+            entry.timestamp is None,
+            entry.timestamp,
+            entry.session_id,
+        )
+    )
+    return timeline
 
 
 def group_sessions_to_incidents(
