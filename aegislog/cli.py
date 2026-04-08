@@ -11,15 +11,16 @@ from aegislog.ml.pipeline import (
     add_threshold_columns,
 )
 
-from aegislog.incidents import (
-    group_sessions_to_incidents,
-    summarize_incident,
-)
-
 from aegislog.ai import (
     build_incident_llm_prompt,
     explain_incident_with_llm,
     local_incident_explanation,
+)
+
+from aegislog.incidents import (
+    group_sessions_to_incidents,
+    summarize_incident,
+    build_incident_timeline,
 )
 
 from aegislog.ai_client import call_llm_for_incident, LLMConfigError
@@ -132,6 +133,21 @@ def incident_to_dict(inc, summary, explanation, llm_prompt) -> dict:
         "local_explanation": explanation,
         "llm_prompt": llm_prompt.prompt,
     }
+
+
+def timeline_entry_to_dict(entry) -> dict:
+    return {
+        "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
+        "session_id": entry.session_id,
+        "ip": entry.ip,
+        "user": entry.user,
+        "auth_failed": entry.auth_failed,
+        "auth_success": entry.auth_success,
+        "event_count": entry.event_count,
+        "anomaly_score": entry.anomaly_score,
+        "event_type": entry.event_type,
+    }
+
 
 def cmd_explain(args: argparse.Namespace) -> None:
     if args.log_type != "ssh_auth":
@@ -280,6 +296,24 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         print(f"  summary_title={summary.title}")
         print(f"  summary_description={summary.description}")
         
+        if getattr(args, "show_timeline", False):
+            timeline = build_incident_timeline(inc, sessions, df)
+            print("  timeline_begin")
+            for entry in timeline:
+                ts = entry.timestamp.isoformat() if entry.timestamp else "unknown"
+                print(
+                    "    "
+                    f"time={ts} "
+                    f"session_id={entry.session_id} "
+                    f"event_type={entry.event_type} "
+                    f"user={entry.user} "
+                    f"auth_failed={entry.auth_failed} "
+                    f"auth_success={entry.auth_success} "
+                    f"events={entry.event_count} "
+                    f"anomaly_score={entry.anomaly_score:.3f}"
+                )
+            print("  timeline_end")
+            
         if getattr(args, "show_local_explanation", False):
             explanation = local_incident_explanation(inc, summary)
             print("  local_explanation_begin")
@@ -530,6 +564,11 @@ def main(argv: list[str] | None = None) -> None:
         "--alerts-only",
         action="store_true",
         help="Group incidents from only threshold-flagged anomalous sessions.",
+    )
+    p_incidents.add_argument(
+        "--show-timeline",
+        action="store_true",
+        help="Show a per-incident session timeline ordered by time.",
     )
     p_incidents.set_defaults(func=cmd_incidents)
 
