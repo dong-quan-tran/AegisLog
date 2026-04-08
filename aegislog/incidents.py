@@ -24,6 +24,8 @@ class Incident:
     severity_reason: str
     confidence: str
     confidence_reason: str
+    primary_user: Optional[str]
+    targeted_users: List[str]
     first_seen: Optional[datetime]
     last_seen: Optional[datetime]
 
@@ -311,9 +313,11 @@ def group_sessions_to_incidents(
         if not sess:
             continue
 
+
         by_key[incident_key].append(
             {
                 "session_id": row["session_id"],
+                "user": row.get("user"),
                 "event_count": row["event_count"],
                 "anomaly_score": row["anomaly_score"],
                 "auth_failed": row.get("auth_failed", 0),
@@ -357,6 +361,9 @@ def group_sessions_to_incidents(
             auth_total = total_failed + total_success
             auth_fail_ratio = total_failed / auth_total if auth_total else 0.0
 
+            users = [s["user"] for s in cluster if isinstance(s.get("user"), str) and s["user"]]
+            targeted_users = sorted(set(users))
+            primary_user = users[0] if users else None
 
             has_success_after_failures = total_failed > 0 and total_success > 0
             
@@ -419,6 +426,8 @@ def group_sessions_to_incidents(
                     confidence_reason=confidence_reason,
                     first_seen=first_seen,
                     last_seen=last_seen,
+                    primary_user=primary_user,
+                    targeted_users=targeted_users
                 )
             )
 
