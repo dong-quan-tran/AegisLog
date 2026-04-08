@@ -214,7 +214,29 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         print("No sessions found.")
         return
 
+    sort_col = "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
+    df = add_threshold_columns(
+        df,
+        score_col=sort_col,
+        threshold_percentile=args.threshold_percentile,
+    )
+
+    if getattr(args, "alerts_only", False):
+        df = df[df["is_anomalous"]]
+
+    if df.empty:
+        print("No incidents found.")
+        return
+
+    # keep only sessions that survived any filtering
+    allowed_ids = set(df["session_id"].tolist())
+    sessions = [s for s in sessions if s.session_id in allowed_ids]
+
     incidents = group_sessions_to_incidents(sessions, df)
+    if not incidents:
+        print("No incidents found.")
+        return
+
     top = incidents[: args.top]
 
     if getattr(args, "format", "text") == "json":
@@ -493,6 +515,17 @@ def main(argv: list[str] | None = None) -> None:
         choices=["iforest", "ocsvm", "lof"],
         default="iforest",
         help="Anomaly model to use for scoring.",
+    )
+    p_incidents.add_argument(
+        "--threshold-percentile",
+        type=float,
+        default=99.0,
+        help="Percentile threshold for flagging anomalous sessions before grouping incidents (default: 99.0).",
+    )
+    p_incidents.add_argument(
+        "--alerts-only",
+        action="store_true",
+        help="Group incidents from only threshold-flagged anomalous sessions.",
     )
     p_incidents.set_defaults(func=cmd_incidents)
 
