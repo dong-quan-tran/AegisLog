@@ -21,6 +21,7 @@ class Incident:
     auth_fail_ratio: float
     has_success_after_failures: bool
     severity: str
+    severity_reason: str
     first_seen: Optional[datetime]
     last_seen: Optional[datetime]
 
@@ -79,6 +80,7 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
         auth_phrase = "no SSH authentication activity recorded"
 
     compromise_hint = ""
+    brute_force_hint = ""
     if incident.has_success_after_failures:
         compromise_hint = (
             " Failed authentication activity was followed by one or more successful logins, "
@@ -141,6 +143,27 @@ def _compute_severity(
         return "medium"
 
     return "low"
+
+
+def _severity_reason(
+    avg_anomaly_score: float,
+    auth_failed: int,
+    auth_fail_ratio: float,
+    has_success_after_failures: bool = False,
+) -> str:
+    if has_success_after_failures and avg_anomaly_score >= 0.20 and auth_failed >= 20:
+        return "failures followed by successful SSH login(s)"
+
+    if avg_anomaly_score >= 0.35 and auth_failed >= 500 and auth_fail_ratio >= 0.95:
+        return "very high failed-auth volume with high anomaly score"
+
+    if avg_anomaly_score >= 0.25 and auth_failed >= 200 and auth_fail_ratio >= 0.90:
+        return "sustained failed-auth pattern with elevated anomaly score"
+
+    if avg_anomaly_score >= 0.15 and auth_failed >= 50 and auth_fail_ratio >= 0.70:
+        return "moderate failed-auth volume with elevated anomaly score"
+
+    return "limited authentication activity and anomaly score"
 
 
 def group_sessions_to_incidents(
@@ -228,6 +251,14 @@ def group_sessions_to_incidents(
                 auth_fail_ratio,
                 has_success_after_failures,
             )
+
+            reason = _severity_reason(
+                avg_score,
+                total_failed,
+                auth_fail_ratio,
+                has_success_after_failures,
+            )
+
             suffix = f"{ip}|{user_key}" if user_key else ip
             incident_id = f"ip:{suffix}#{cluster_idx}"
 
@@ -244,10 +275,19 @@ def group_sessions_to_incidents(
                     auth_fail_ratio=auth_fail_ratio,
                     has_success_after_failures=has_success_after_failures,
                     severity=severity,
+                    severity_reason=reason,
                     first_seen=first_seen,
                     last_seen=last_seen,
                 )
             )
 
-    incidents.sort(key=lambda inc: inc.avg_anomaly_score, reverse=True)
+    severity_rank = {"high": 3, "medium": 2, "low": 1}
+
+    incidents.sort(
+        key=lambda inc: (
+            severity_rank.get(inc.severity, 0),
+            inc.avg_anomaly_score,
+        ),
+        reverse=True,
+    ) 
     return incidents
