@@ -117,6 +117,8 @@ def incident_to_dict(inc, summary, explanation, llm_prompt) -> dict:
             "ip": inc.ip,
             "severity": inc.severity,
             "severity_reason": getattr(inc, "severity_reason", None),
+            "confidence": getattr(inc, "confidence", None),
+            "confidence_reason": getattr(inc, "confidence_reason", None),
             "session_ids": inc.session_ids,
             "total_events": inc.total_events,
             "avg_anomaly_score": inc.avg_anomaly_score,
@@ -177,11 +179,17 @@ def cmd_explain(args: argparse.Namespace) -> None:
     print(f"Explaining incident at index {args.index}: {inc.incident_id}")
     print(
         f"  ip={inc.ip} severity={inc.severity} "
+        f"confidence={getattr(inc, 'confidence', 'unknown')} "
         f"sessions={len(inc.session_ids)} total_events={inc.total_events} "
         f"auth_failed={inc.auth_failed} auth_success={inc.auth_success} "
         f"auth_fail_ratio={inc.auth_fail_ratio:.2f} "
         f"avg_anomaly_score={inc.avg_anomaly_score:.3f}"
     )
+
+    if getattr(inc, "severity_reason", None):
+        print(f"  severity_reason={inc.severity_reason}")
+    if getattr(inc, "confidence_reason", None):
+        print(f"  confidence_reason={inc.confidence_reason}")
 
     summary = summarize_incident(inc)
     print(f"  summary_title={summary.title}")
@@ -292,6 +300,12 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         if getattr(inc, "severity_reason", None):
             print(f"  severity_reason={inc.severity_reason}")
 
+        if getattr(inc, "confidence", None):
+            print(f"  confidence={inc.confidence}")
+
+        if getattr(inc, "confidence_reason", None):
+            print(f"  confidence_reason={inc.confidence_reason}")
+
         summary = summarize_incident(inc)
         print(f"  summary_title={summary.title}")
         print(f"  summary_description={summary.description}")
@@ -313,7 +327,7 @@ def cmd_incidents(args: argparse.Namespace) -> None:
                     f"anomaly_score={entry.anomaly_score:.3f}"
                 )
             print("  timeline_end")
-            
+
         if getattr(args, "show_local_explanation", False):
             explanation = local_incident_explanation(inc, summary)
             print("  local_explanation_begin")
