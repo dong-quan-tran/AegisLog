@@ -22,6 +22,8 @@ class Incident:
     has_success_after_failures: bool
     severity: str
     severity_reason: str
+    confidence: str
+    confidence_reason: str
     first_seen: Optional[datetime]
     last_seen: Optional[datetime]
 
@@ -179,6 +181,61 @@ def _severity_reason(
     return "limited authentication activity and anomaly score"
 
 
+def _compute_confidence(
+    avg_anomaly_score: float,
+    auth_failed: int,
+    auth_success: int,
+    auth_fail_ratio: float,
+    session_count: int,
+    has_success_after_failures: bool = False,
+) -> str:
+    if (
+        has_success_after_failures
+        or (auth_failed >= 100 and session_count >= 2 and auth_fail_ratio >= 0.90)
+        or (avg_anomaly_score >= 0.30 and auth_failed >= 50 and session_count >= 2)
+    ):
+        return "high"
+
+    if (
+        auth_failed >= 20
+        or session_count >= 2
+        or avg_anomaly_score >= 0.20
+        or auth_fail_ratio >= 0.80
+    ):
+        return "medium"
+
+    return "low"
+
+
+def _confidence_reason(
+    avg_anomaly_score: float,
+    auth_failed: int,
+    auth_success: int,
+    auth_fail_ratio: float,
+    session_count: int,
+    has_success_after_failures: bool = False,
+) -> str:
+    if has_success_after_failures:
+        return "successful authentication occurred after failed attempts"
+
+    if auth_failed >= 100 and session_count >= 2 and auth_fail_ratio >= 0.90:
+        return "repeated failed authentications across multiple sessions"
+
+    if avg_anomaly_score >= 0.30 and auth_failed >= 50 and session_count >= 2:
+        return "elevated anomaly score with repeated suspicious activity"
+
+    if auth_failed >= 20:
+        return "moderate volume of failed authentications"
+
+    if session_count >= 2:
+        return "activity repeated across multiple sessions"
+
+    if avg_anomaly_score >= 0.20:
+        return "anomaly score is elevated but supporting evidence is limited"
+
+    return "limited supporting evidence beyond the base anomaly signal"
+
+
 def build_incident_timeline(
     incident: Incident,
     sessions: List[Session],
@@ -323,6 +380,24 @@ def group_sessions_to_incidents(
                 has_success_after_failures,
             )
 
+            confidence = _compute_confidence(
+                avg_score,
+                total_failed,
+                total_success,
+                auth_fail_ratio,
+                len(session_ids),
+                has_success_after_failures,
+            )
+
+            confidence_reason = _confidence_reason(
+                avg_score,
+                total_failed,
+                total_success,
+                auth_fail_ratio,
+                len(session_ids),
+                has_success_after_failures,
+            )
+
             suffix = f"{ip}|{user_key}" if user_key else ip
             incident_id = f"ip:{suffix}#{cluster_idx}"
 
@@ -340,6 +415,8 @@ def group_sessions_to_incidents(
                     has_success_after_failures=has_success_after_failures,
                     severity=severity,
                     severity_reason=reason,
+                    confidence=confidence,
+                    confidence_reason=confidence_reason,
                     first_seen=first_seen,
                     last_seen=last_seen,
                 )
