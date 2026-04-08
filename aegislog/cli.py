@@ -4,16 +4,24 @@ import json
 from aegislog.parsing.apache_error import parse_error_file
 from aegislog.parsing.auth_ssh import parse_ssh_file
 from aegislog.features.sessions import build_sessions
-from aegislog.ml.pipeline import score_sessions, score_sessions_multi
+
+from aegislog.ml.pipeline import (
+    score_sessions,
+    score_sessions_multi,
+    add_threshold_columns,
+)
+
 from aegislog.incidents import (
     group_sessions_to_incidents,
     summarize_incident,
 )
+
 from aegislog.ai import (
     build_incident_llm_prompt,
     explain_incident_with_llm,
     local_incident_explanation,
 )
+
 from aegislog.ai_client import call_llm_for_incident, LLMConfigError
 
 
@@ -51,11 +59,15 @@ def session_row_to_dict(row) -> dict:
         "lof_score",
         "lof_score_norm",
         "ensemble_score",
+        "anomaly_percentile",
     ]
 
     for field in optional_score_fields:
         if field in row:
             result[field] = float(row[field])
+
+    if "is_anomalous" in row:
+        result["is_anomalous"] = bool(row["is_anomalous"])
 
     return result
 
@@ -302,6 +314,15 @@ def cmd_analyze(args: argparse.Namespace) -> None:
         return
 
     sort_col = "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
+    df = add_threshold_columns(
+        df,
+        score_col=sort_col,
+        threshold_percentile=args.threshold_percentile,
+    )
+
+    if getattr(args, "alerts_only", False):
+        df = df[df["is_anomalous"]]
+
     df_sorted = df.sort_values(sort_col, ascending=False)
     top = df_sorted.head(args.top)
 
@@ -320,6 +341,8 @@ def cmd_analyze(args: argparse.Namespace) -> None:
             f"events={row['event_count']}",
             f"error_ratio={row['error_ratio']:.2f}",
             f"anomaly_score={row['anomaly_score']:.3f}",
+            f"anomaly_percentile={row['anomaly_percentile']:.1f}",
+            f"is_anomalous={bool(row['is_anomalous'])}",        
         ]
 
         if "iforest_score" in row.index:
@@ -410,6 +433,17 @@ def main(argv: list[str] | None = None) -> None:
         "--multi-score",
         action="store_true",
         help="Score sessions with all available models and include normalized/ensemble scores.",
+    )
+    p_analyze.add_argument(
+        "--threshold-percentile",
+        type=float,
+        default=99.0,
+        help="Percentile threshold for flagging anomalous sessions (default: 99.0).",
+    )
+    p_analyze.add_argument(
+        "--alerts-only",
+        action="store_true",
+        help="Show only sessions at or above the anomaly threshold.",
     )
     p_analyze.set_defaults(func=cmd_analyze)
 
