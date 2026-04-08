@@ -567,3 +567,69 @@ Fixing incident ID format to satisfy integration tests.
 Confirmed training scripts and module invocation patterns:
 
 Use python -m aegislog.ml.train ... from the repo root with actual log paths under data/loghub/.
+
+# Progress – 2026-04-07
+
+## Today’s Changes
+
+### `pipeline.py`
+
+- Added `add_threshold_columns` helper to compute `anomaly_percentile` and `is_anomalous` from session scores, designed to work with both single-model and ensemble scores.
+
+### `cli.py` – `analyze` command
+
+- Imported `add_threshold_columns` alongside `score_sessions` and `score_sessions_multi`.
+- Added CLI flags:
+  - `--threshold-percentile` to control the anomaly percentile cutoff.
+  - `--alerts-only` to show only sessions at or above the threshold.
+- Chose `sort_col` as `ensemble_score` when present, otherwise `anomaly_score`.
+- Applied thresholding via `add_threshold_columns` before sorting.
+- Filtered the dataframe when `--alerts-only` is set to keep only `is_anomalous == True`.
+- Extended JSON output (`session_row_to_dict`) to include:
+  - `anomaly_percentile`
+  - `is_anomalous`
+- Extended text output to display:
+  - `anomaly_percentile`
+  - `is_anomalous` for each session.
+
+### `cli.py` – `incidents` command
+
+- Added CLI flags:
+  - `--threshold-percentile` to control the percentile cutoff before grouping.
+  - `--alerts-only` to group incidents only from threshold-flagged anomalous sessions.
+- Reused `add_threshold_columns` on the scored sessions dataframe.
+- When `--alerts-only` is set, filtered the scored dataframe to `is_anomalous == True`.
+- Restricted the `sessions` list to only those session IDs that remain after filtering, so incident grouping aligns with alerting.
+
+### `incidents.py` – Severity and Explainability
+
+- Kept `_compute_severity` as the core rules-based severity calculator.
+- Added `_severity_reason` helper to provide a human-readable explanation of why an incident is `high` / `medium` / `low`:
+  - Examples: “failures followed by successful SSH login(s)”, “very high failed-auth volume with high anomaly score”, “sustained failed-auth pattern with elevated anomaly score”.
+- Extended `Incident` dataclass with:
+  - `severity_reason: str`
+- In `group_sessions_to_incidents`:
+  - Computed `severity` using `_compute_severity`.
+  - Computed `severity_reason` using `_severity_reason`.
+  - Included `severity_reason` when constructing each `Incident`.
+- Updated incident ordering:
+  - Defined `severity_rank = {"high": 3, "medium": 2, "low": 1}`.
+  - Sorted incidents by `(severity_rank[severity], avg_anomaly_score)` descending to surface the most urgent incidents first.
+- Fixed a minor bug in `summarize_incident`:
+  - Ensured `brute_force_hint` is initialized before use.
+
+### Git Commits (conceptual)
+
+- `Add percentile thresholding and alert filtering to analyze command`
+- `Apply threshold filtering to incident generation in CLI`
+- `Expose incident severity reasons and sort by severity in incidents`
+
+## Planned for Next Session
+
+- Surface `severity_reason` in:
+  - `incident_to_dict` JSON output.
+  - Text output of `cmd_incidents` (e.g., an extra line per incident).
+- Add a concise `train.py` cheatsheet:
+  - Required inputs and expected outputs.
+  - Recommended model paths and log types.
+  - Example commands for common workflows.
