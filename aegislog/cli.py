@@ -4,7 +4,7 @@ import json
 from aegislog.parsing.apache_error import parse_error_file
 from aegislog.parsing.auth_ssh import parse_ssh_file
 from aegislog.features.sessions import build_sessions
-from aegislog.ml.pipeline import score_sessions
+from aegislog.ml.pipeline import score_sessions, score_sessions_multi
 from aegislog.incidents import (
     group_sessions_to_incidents,
     summarize_incident,
@@ -34,7 +34,7 @@ def session_row_to_dict(row) -> dict:
     if ip != ip:
         ip = None
 
-    return {
+    result = {
         "session_id": row["session_id"],
         "ip": ip,
         "user": user,
@@ -42,6 +42,22 @@ def session_row_to_dict(row) -> dict:
         "error_ratio": float(row["error_ratio"]),
         "anomaly_score": float(row["anomaly_score"]),
     }
+
+    optional_score_fields = [
+        "iforest_score",
+        "iforest_score_norm",
+        "ocsvm_score",
+        "ocsvm_score_norm",
+        "lof_score",
+        "lof_score_norm",
+        "ensemble_score",
+    ]
+
+    for field in optional_score_fields:
+        if field in row:
+            result[field] = float(row[field])
+
+    return result
 
 
 def resolve_model_path(args) -> str:
@@ -64,6 +80,21 @@ def resolve_model_path(args) -> str:
         return "models/log_anomaly_lof_ssh.joblib"
     else:
         return "models/log_anomaly_lof_apache.joblib"
+
+
+def resolve_multi_model_paths(args) -> dict[str, str]:
+    paths: dict[str, str] = {}
+
+    if args.log_type == "ssh_auth":
+        paths["iforest"] = "models/log_anomaly_iforest_ssh.joblib"
+        paths["ocsvm"] = "models/log_anomaly_ocsvm_ssh.joblib"
+        paths["lof"] = "models/log_anomaly_lof_ssh.joblib"
+    else:
+        paths["iforest"] = "models/log_anomaly_iforest_apache.joblib"
+        paths["ocsvm"] = "models/log_anomaly_ocsvm_apache.joblib"
+        paths["lof"] = "models/log_anomaly_lof_apache.joblib"
+
+    return paths
 
 
 def incident_to_dict(inc, summary, explanation, llm_prompt) -> dict:
@@ -257,16 +288,21 @@ def cmd_analyze(args: argparse.Namespace) -> None:
         if args.model_path is None:
             args.model_path = "models/log_anomaly_iforest_ssh.joblib"
 
-    model_path = resolve_model_path(args)
-
     sessions = build_sessions(events)
-    df = score_sessions(sessions, model_path=model_path)
+
+    if getattr(args, "multi_score", False):
+        model_paths = resolve_multi_model_paths(args)
+        df = score_sessions_multi(sessions, model_paths=model_paths, add_ensemble=True)
+    else:
+        model_path = resolve_model_path(args)
+        df = score_sessions(sessions, model_path=model_path)
 
     if df.empty:
         print("No sessions found.")
         return
 
-    df_sorted = df.sort_values("anomaly_score", ascending=False)
+    sort_col = "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
+    df_sorted = df.sort_values(sort_col, ascending=False)
     top = df_sorted.head(args.top)
 
     if getattr(args, "format", "text") == "json":
@@ -277,13 +313,25 @@ def cmd_analyze(args: argparse.Namespace) -> None:
 
     print(f"Top {len(top)} anomalous sessions:")
     for _, row in top.iterrows():
-        print(
-            f"- session_id={row['session_id']} "
-            f"ip={row['ip']} user={row['user']} "
-            f"events={row['event_count']} "
-            f"error_ratio={row['error_ratio']:.2f} "
-            f"anomaly_score={row['anomaly_score']:.3f}"
-        )
+        parts = [
+            f"session_id={row['session_id']}",
+            f"ip={row['ip']}",
+            f"user={row['user']}",
+            f"events={row['event_count']}",
+            f"error_ratio={row['error_ratio']:.2f}",
+            f"anomaly_score={row['anomaly_score']:.3f}",
+        ]
+
+        if "iforest_score" in row.index:
+            parts.append(f"iforest_score={row['iforest_score']:.3f}")
+        if "ocsvm_score" in row.index:
+            parts.append(f"ocsvm_score={row['ocsvm_score']:.3f}")
+        if "lof_score" in row.index:
+            parts.append(f"lof_score={row['lof_score']:.3f}")
+        if "ensemble_score" in row.index:
+            parts.append(f"ensemble_score={row['ensemble_score']:.3f}")
+
+        print("- " + " ".join(parts))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -357,6 +405,11 @@ def main(argv: list[str] | None = None) -> None:
         choices=["iforest", "ocsvm", "lof"],
         default="iforest",
         help="Anomaly model to use for scoring.",
+    )
+    p_analyze.add_argument(
+        "--multi-score",
+        action="store_true",
+        help="Score sessions with all available models and include normalized/ensemble scores.",
     )
     p_analyze.set_defaults(func=cmd_analyze)
 
