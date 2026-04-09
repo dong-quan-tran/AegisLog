@@ -633,3 +633,73 @@ Use python -m aegislog.ml.train ... from the repo root with actual log paths und
   - Required inputs and expected outputs.
   - Recommended model paths and log types.
   - Example commands for common workflows.
+
+
+# Progress – 2026-04-08
+
+## Today’s Changes
+
+### Incident confidence & targeting (`incidents.py`)
+
+- Extended `Incident` dataclass with:
+  - `severity_reason`
+  - `confidence`
+  - `confidence_reason`
+  - `primary_user`
+  - `targeted_users`
+- Added `_compute_confidence(...)` and `_confidence_reason(...)` helpers to assign:
+  - `confidence` as `high` / `medium` / `low` based on:
+    - anomaly score
+    - failed/successful auth volume
+    - failure ratio
+    - session count
+    - presence of success after failures
+  - `confidence_reason` as a short human-readable explanation of the evidence strength.
+- Updated `group_sessions_to_incidents(...)` to:
+  - Calculate `severity`, `severity_reason`, `confidence`, and `confidence_reason` per incident cluster.
+  - Derive targeted account information:
+    - `users` gathered from clustered sessions
+    - `targeted_users` as a de-duplicated list of usernames
+    - `primary_user` as the first (or most common) targeted username.
+- Kept existing severity-based sorting, now with richer per-incident context.
+
+### Incident timelines & CLI wiring (`cli.py` + `incidents.py`)
+
+- Added `IncidentTimelineEntry` dataclass and `build_incident_timeline(...)`:
+  - Builds a per-incident session timeline with:
+    - timestamp, session_id, ip, user
+    - `auth_failed`, `auth_success`, `event_count`, `anomaly_score`
+    - `event_type` (`failure`, `success`, `failures_then_success`, `session`)
+  - Sorts entries chronologically by session start time.
+- Wired incident timelines into the CLI:
+  - New `--show-timeline` flag on `aegislog incidents`.
+  - When enabled, prints a `timeline_begin`/`timeline_end` block per incident with one line per session entry.
+
+### CLI incident confidence & severity (`cli.py`)
+
+- Updated JSON output (`incident_to_dict`) to include:
+  - `severity`
+  - `severity_reason`
+  - `confidence`
+  - `confidence_reason`
+- Updated `cmd_incidents` text output to print per incident:
+  - `severity`
+  - `severity_reason` (if present)
+  - `confidence`
+  - `confidence_reason`
+- Updated `cmd_explain`:
+  - Includes `confidence` in the header line.
+  - Prints `severity_reason` and `confidence_reason` when available.
+
+### Targeted account summaries (`cli.py` + `incidents.py`)
+
+- `incidents.py`:
+  - Derived `primary_user` and `targeted_users` for each incident from clustered session usernames.
+- `cli.py` (conceptual plan / next small tweak):
+  - JSON and text output are now ready to surface targeted account information alongside IP, severity, confidence, and timelines.
+
+## Commits (conceptual)
+
+- `Add confidence scoring and reasons to incidents`
+- `Add per-incident session timeline output to CLI`
+- `Surface incident confidence and targeted users in CLI output`
