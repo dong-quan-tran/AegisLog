@@ -186,7 +186,6 @@ def _severity_reason(
 def _compute_confidence(
     avg_anomaly_score: float,
     auth_failed: int,
-    auth_success: int,
     auth_fail_ratio: float,
     session_count: int,
     has_success_after_failures: bool = False,
@@ -212,7 +211,6 @@ def _compute_confidence(
 def _confidence_reason(
     avg_anomaly_score: float,
     auth_failed: int,
-    auth_success: int,
     auth_fail_ratio: float,
     session_count: int,
     has_success_after_failures: bool = False,
@@ -390,7 +388,6 @@ def group_sessions_to_incidents(
             confidence = _compute_confidence(
                 avg_score,
                 total_failed,
-                total_success,
                 auth_fail_ratio,
                 len(session_ids),
                 has_success_after_failures,
@@ -399,7 +396,6 @@ def group_sessions_to_incidents(
             confidence_reason = _confidence_reason(
                 avg_score,
                 total_failed,
-                total_success,
                 auth_fail_ratio,
                 len(session_ids),
                 has_success_after_failures,
@@ -451,7 +447,7 @@ def build_incident_report(
 ) -> dict:
     severity_counts = Counter(inc.severity for inc in incidents)
     confidence_counts = Counter(
-        inc.confidence for inc in incidents if getattr(inc, "confidence", None)
+        inc.confidence for inc in incidents if inc.confidence
     )
     ip_counts = Counter(inc.ip for inc in incidents if inc.ip)
 
