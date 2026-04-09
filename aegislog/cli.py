@@ -27,6 +27,30 @@ from aegislog.incidents import (
 from aegislog.ai_client import call_llm_for_incident, LLMConfigError
 
 
+SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3}
+CONFIDENCE_ORDER = {"low": 1, "medium": 2, "high": 3}
+
+
+def filter_incidents_by_thresholds(
+    incidents,
+    min_severity: str | None = None,
+    min_confidence: str | None = None,
+):
+    if not min_severity and not min_confidence:
+        return incidents
+
+    def keep(inc):
+        if min_severity:
+            if SEVERITY_ORDER.get(inc.severity, 0) < SEVERITY_ORDER[min_severity]:
+                return False
+        if min_confidence and getattr(inc, "confidence", None):
+            if CONFIDENCE_ORDER.get(inc.confidence, 0) < CONFIDENCE_ORDER[min_confidence]:
+                return False
+        return True
+
+    return [inc for inc in incidents if keep(inc)]
+
+
 def write_output(data: str, output_path: str | None) -> None:
     if output_path:
         with open(output_path, "w", encoding="utf-8") as f:
@@ -259,6 +283,16 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         print("No incidents found.")
         return
 
+    incidents = filter_incidents_by_thresholds(
+        incidents,
+        min_severity=getattr(args, "min_severity", None),
+        min_confidence=getattr(args, "min_confidence", None),
+    )
+
+    if not incidents:
+        print("No incidents found after applying severity/confidence filters.")
+        return
+
     top = incidents[: args.top]
 
     if getattr(args, "format", "text") == "json":
@@ -474,6 +508,16 @@ def cmd_report(args: argparse.Namespace) -> None:
 
     incidents = group_sessions_to_incidents(sessions_filtered, anomalous_df)
 
+    incidents = filter_incidents_by_thresholds(
+        incidents,
+        min_severity=getattr(args, "min_severity", None),
+        min_confidence=getattr(args, "min_confidence", None),
+    )
+
+    if not incidents:
+        print("No incidents matched the specified severity/confidence filters.")
+        return
+
     report = build_incident_report(
         incidents,
         total_sessions=total_sessions,
@@ -666,6 +710,17 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_incidents.set_defaults(func=cmd_incidents)
 
+    p_incidents.add_argument(
+        "--min-severity",
+        choices=["low", "medium", "high"],
+        help="Only include incidents at or above this severity.",
+    )
+    p_incidents.add_argument(
+        "--min-confidence",
+        choices=["low", "medium", "high"],
+        help="Only include incidents at or above this confidence level.",
+    )
+
     p_explain = subparsers.add_parser(
         "explain", help="Explain a single SSH incident with AI-style output."
     )
@@ -761,6 +816,16 @@ def main(argv: list[str] | None = None) -> None:
     p_report.add_argument(
         "--output",
         help="Optional path to write JSON output instead of stdout.",
+    )
+    p_report.add_argument(
+        "--min-severity",
+        choices=["low", "medium", "high"],
+        help="Only include incidents at or above this severity in the report.",
+    )
+    p_report.add_argument(
+        "--min-confidence",
+        choices=["low", "medium", "high"],
+        help="Only include incidents at or above this confidence level in the report.",
     )
     p_report.set_defaults(func=cmd_report)
     args = parser.parse_args(argv)
