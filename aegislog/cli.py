@@ -21,6 +21,7 @@ from aegislog.incidents import (
     group_sessions_to_incidents,
     summarize_incident,
     build_incident_timeline,
+    build_incident_report
 )
 
 from aegislog.ai_client import call_llm_for_incident, LLMConfigError
@@ -438,6 +439,83 @@ def cmd_analyze(args: argparse.Namespace) -> None:
 
         print("- " + " ".join(parts))
 
+def cmd_report(args: argparse.Namespace) -> None:
+    if args.log_type != "ssh_auth":
+        print("Currently, report is only implemented for ssh_auth logs.")
+        return
+
+    events = parse_ssh_file(args.log_path)
+    sessions = build_sessions(events)
+
+    total_sessions = len(sessions)
+
+    if getattr(args, "multi_score", False):
+        model_paths = resolve_multi_model_paths(args)
+        df = score_sessions_multi(sessions, model_paths=model_paths, add_ensemble=True)
+    else:
+        model_path = resolve_model_path(args)
+        df = score_sessions(sessions, model_path=model_path)
+
+    if df.empty:
+        print("No sessions found.")
+        return
+
+    sort_col = "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
+    df = add_threshold_columns(
+        df,
+        score_col=sort_col,
+        threshold_percentile=args.threshold_percentile,
+    )
+
+    anomalous_df = df[df["is_anomalous"]]
+    anomalous_sessions = len(anomalous_df)
+
+    if anomalous_sessions == 0:
+        print("No anomalous sessions found; no incidents to report.")
+        return
+
+    # Keep only anomalous sessions for incident grouping
+    allowed_ids = set(anomalous_df["session_id"].tolist())
+    sessions_filtered = [s for s in sessions if s.session_id in allowed_ids]
+
+    incidents = group_sessions_to_incidents(sessions_filtered, anomalous_df)
+
+    report = build_incident_report(
+        incidents,
+        total_sessions=total_sessions,
+        anomalous_sessions=anomalous_sessions,
+        top_n=args.top,
+    )
+
+    if getattr(args, "format", "text") == "json":
+        data = json.dumps(report, indent=2)
+        write_output(data, getattr(args, "output", None))
+        return
+
+    print("Incident report:")
+    print(f"  total_sessions={report.get('total_sessions', 0)}")
+    print(f"  anomalous_sessions={report.get('anomalous_sessions', 0)}")
+    print(
+        f"  anomalous_session_percent="
+        f"{report.get('anomalous_session_percent', 0.0):.2f}"
+    )
+    print(f"  total_incidents={report['total_incidents']}")
+    print(f"  severity_counts={report['severity_counts']}")
+    print(f"  confidence_counts={report['confidence_counts']}")
+
+    if report["top_incident_ips"]:
+        print("  top_incident_ips:")
+        for item in report["top_incident_ips"]:
+            print(
+                f"    ip={item['ip']} incident_count={item['incident_count']}"
+            )
+
+    if report["top_targeted_users"]:
+        print("  top_targeted_users:")
+        for item in report["top_targeted_users"]:
+            print(
+                f"    user={item['user']} incident_count={item['incident_count']}"
+            )
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
@@ -641,6 +719,56 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_explain.set_defaults(func=cmd_explain)
 
+    p_report = subparsers.add_parser(
+        "report",
+        help="Summarize anomalous sessions and grouped incidents with aggregate metrics.",
+    )
+    p_report.add_argument("log_path", help="Path to log file.")
+    p_report.add_argument(
+        "--log-type",
+        choices=["ssh_auth"],
+        default="ssh_auth",
+        help="Type of log file to parse (currently ssh_auth only).",
+    )
+    p_report.add_argument(
+        "--model-path",
+        default=None,
+        help="Path to trained model (defaults depend on log-type/profile).",
+    )
+    p_report.add_argument(
+        "--model-type",
+        choices=["iforest", "ocsvm", "lof"],
+        default="iforest",
+        help="Anomaly model to use for scoring.",
+    )
+    p_report.add_argument(
+        "--multi-score",
+        action="store_true",
+        help="Score sessions with all available models and include normalized/ensemble scores.",
+    )
+    p_report.add_argument(
+        "--threshold-percentile",
+        type=float,
+        default=99.0,
+        help="Percentile threshold for flagging anomalous sessions before reporting (default: 99.0).",
+    )
+    p_report.add_argument(
+        "--top",
+        type=int,
+        default=5,
+        help="Number of top IPs/users to include in the report.",
+    )
+    p_report.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format for the report (default: text).",
+    )
+    p_report.add_argument(
+        "--output",
+        help="Optional path to write JSON output instead of stdout.",
+    )
+    p_report.set_defaults(func=cmd_report)
     args = parser.parse_args(argv)
     args.func(args)
 
