@@ -128,8 +128,8 @@ def incident_to_dict(inc, summary, explanation, llm_prompt) -> dict:
             "auth_fail_ratio": inc.auth_fail_ratio,
             "first_seen": inc.first_seen.isoformat() if inc.first_seen else None,
             "last_seen": inc.last_seen.isoformat() if inc.last_seen else None,
-            "primary_user": getattr(inc, "primary_user", None),
-            "targeted_users": getattr(inc, "targeted_users", []),        
+            "primary_user": inc.primary_user,
+            "targeted_users": inc.targeted_users,       
         },
 
         "summary": {
@@ -250,18 +250,6 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         threshold_percentile=args.threshold_percentile,
     )
 
-    if getattr(args, "alerts_only", False):
-        df = df[df["is_anomalous"]]
-
-    if getattr(inc, "primary_user", None):
-            print(f"  primary_user={inc.primary_user}")
-    if getattr(inc, "targeted_users", None):
-            print(f"  targeted_users={','.join(inc.targeted_users)}")
-
-    if df.empty:
-        print("No incidents found.")
-        return
-
     # keep only sessions that survived any filtering
     allowed_ids = set(df["session_id"].tolist())
     sessions = [s for s in sessions if s.session_id in allowed_ids]
@@ -315,6 +303,12 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         if getattr(inc, "confidence_reason", None):
             print(f"  confidence_reason={inc.confidence_reason}")
 
+        if getattr(inc, "primary_user", None):
+            print(f"  primary_user={inc.primary_user}")
+
+        if getattr(inc, "targeted_users", None):
+            print(f"  targeted_users={','.join(inc.targeted_users)}")
+        
         summary = summarize_incident(inc)
         print(f"  summary_title={summary.title}")
         print(f"  summary_description={summary.description}")
