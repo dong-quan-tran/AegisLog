@@ -43,9 +43,15 @@ def filter_incidents_by_thresholds(
         if min_severity:
             if SEVERITY_ORDER.get(inc.severity, 0) < SEVERITY_ORDER[min_severity]:
                 return False
-        if min_confidence and getattr(inc, "confidence", None):
-            if CONFIDENCE_ORDER.get(inc.confidence, 0) < CONFIDENCE_ORDER[min_confidence]:
+
+        if min_confidence:
+            conf = getattr(inc, "confidence", None)
+            # Treat missing confidence as below any requested minimum.
+            if conf is None:
                 return False
+            if CONFIDENCE_ORDER.get(conf, 0) < CONFIDENCE_ORDER[min_confidence]:
+                return False
+
         return True
 
     return [inc for inc in incidents if keep(inc)]
@@ -708,7 +714,6 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Show a per-incident session timeline ordered by time.",
     )
-    p_incidents.set_defaults(func=cmd_incidents)
 
     p_incidents.add_argument(
         "--min-severity",
@@ -721,6 +726,8 @@ def main(argv: list[str] | None = None) -> None:
         help="Only include incidents at or above this confidence level.",
     )
 
+    p_incidents.set_defaults(func=cmd_incidents)
+    
     p_explain = subparsers.add_parser(
         "explain", help="Explain a single SSH incident with AI-style output."
     )
