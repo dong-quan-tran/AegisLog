@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
@@ -441,3 +441,49 @@ def group_sessions_to_incidents(
         reverse=True,
     ) 
     return incidents
+
+
+def build_incident_report(
+    incidents: List[Incident],
+    total_sessions: Optional[int] = None,
+    anomalous_sessions: Optional[int] = None,
+    top_n: int = 5,
+) -> dict:
+    severity_counts = Counter(inc.severity for inc in incidents)
+    confidence_counts = Counter(
+        inc.confidence for inc in incidents if getattr(inc, "confidence", None)
+    )
+    ip_counts = Counter(inc.ip for inc in incidents if inc.ip)
+
+    targeted_user_counts = Counter()
+    for inc in incidents:
+        for user in getattr(inc, "targeted_users", []) or []:
+            targeted_user_counts[user] += 1
+
+    report = {
+        "total_incidents": len(incidents),
+        "severity_counts": dict(severity_counts),
+        "confidence_counts": dict(confidence_counts),
+        "top_incident_ips": [
+            {"ip": ip, "incident_count": count}
+            for ip, count in ip_counts.most_common(top_n)
+        ],
+        "top_targeted_users": [
+            {"user": user, "incident_count": count}
+            for user, count in targeted_user_counts.most_common(top_n)
+        ],
+    }
+
+    if total_sessions is not None:
+        report["total_sessions"] = int(total_sessions)
+
+    if anomalous_sessions is not None:
+        report["anomalous_sessions"] = int(anomalous_sessions)
+        if total_sessions:
+            report["anomalous_session_percent"] = round(
+                100.0 * anomalous_sessions / total_sessions, 2
+            )
+        else:
+            report["anomalous_session_percent"] = 0.0
+
+    return report
