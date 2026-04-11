@@ -144,12 +144,14 @@ Key options:
   - `low`, `medium`, `high`.
 - `--min-confidence`: Filter incidents at or above this confidence:
   - `low`, `medium`, `high`.
+- `--sort-by`: Sort incidents before applying `--top`:
+  - `severity`, `avg_score`, `auth_fail_ratio`, `total_events`.
 - `--format`: `text` (default) or `json`.
 - `--output`: Optional path to write JSON instead of stdout.
 
 JSON incidents include:
 
-- incident fields (id, ip, severity, severity_reason, confidence, confidence_reason, session_ids, totals, first/last seen, primary_user, targeted_users)
+- incident fields (id, ip, severity, severity_reason, confidence, confidence_reason, priority, priority_score, priority_reason, attack_pattern, attack_pattern_reason, session_ids, totals, first/last seen, primary_user, targeted_users)
 - summary (title, description)
 - local_explanation
 - llm_prompt (prompt text only)
@@ -272,5 +274,7 @@ JSON reports include:
 - `total_incidents`
 - `severity_counts`
 - `confidence_counts`
+- `priority_counts`
+- `attack_pattern_counts`
 - `top_incident_ips`
 - `top_targeted_users`
