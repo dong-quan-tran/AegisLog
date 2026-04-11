@@ -187,6 +187,8 @@ def incident_to_dict(inc, summary, explanation, llm_prompt) -> dict:
             "priority": getattr(inc, "priority", None),
             "priority_score": getattr(inc, "priority_score", None),
             "priority_reason": getattr(inc, "priority_reason", None),
+            "attack_pattern": getattr(inc, "attack_pattern", None),
+            "attack_pattern_reason": getattr(inc, "attack_pattern_reason", None),
             "session_ids": inc.session_ids,
             "total_events": inc.total_events,
             "avg_anomaly_score": inc.avg_anomaly_score,
@@ -268,6 +270,7 @@ def cmd_explain(args: argparse.Namespace) -> None:
         f"  ip={inc.ip} severity={inc.severity} "
         f"confidence={getattr(inc, 'confidence', 'unknown')} "
         f"priority={getattr(inc, 'priority', 'unknown')} "
+        f"pattern={getattr(inc, 'attack_pattern', 'unknown')} "
         f"priority_score={getattr(inc, 'priority_score', 'unknown')} "
         f"sessions={len(inc.session_ids)} total_events={inc.total_events} "
         f"auth_failed={inc.auth_failed} auth_success={inc.auth_success} "
@@ -277,11 +280,16 @@ def cmd_explain(args: argparse.Namespace) -> None:
 
     if getattr(inc, "severity_reason", None):
         print(f"  severity_reason={inc.severity_reason}")
+    
     if getattr(inc, "confidence_reason", None):
         print(f"  confidence_reason={inc.confidence_reason}")
+    
     if getattr(inc, "priority_reason", None):
         print(f"  priority_reason={inc.priority_reason}")
-        
+    
+    if getattr(inc, "attack_pattern_reason", None):
+        print(f"  attack_pattern_reason={inc.attack_pattern_reason}")
+
     summary = summarize_incident(inc)
     print(f"  summary_title={summary.title}")
     print(f"  summary_description={summary.description}")
@@ -388,6 +396,7 @@ def cmd_incidents(args: argparse.Namespace) -> None:
             f"- incident_id={inc.incident_id} ip={inc.ip} "
             f"severity={inc.severity} "
             f"priority={getattr(inc, 'priority', 'unknown')} "
+            f"pattern={getattr(inc, 'attack_pattern', 'unknown')} "
             f"time_window={time_window} "
             f"sessions={len(inc.session_ids)} "
             f"total_events={inc.total_events} "
@@ -413,6 +422,9 @@ def cmd_incidents(args: argparse.Namespace) -> None:
 
         if getattr(inc, "priority_reason", None):
             print(f"  priority_reason={inc.priority_reason}")
+
+        if getattr(inc, "attack_pattern_reason", None):
+            print(f"  attack_pattern_reason={inc.attack_pattern_reason}")
 
         summary = summarize_incident(inc)
         print(f"  summary_title={summary.title}")
