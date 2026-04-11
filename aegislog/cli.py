@@ -31,6 +31,40 @@ SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3}
 CONFIDENCE_ORDER = {"low": 1, "medium": 2, "high": 3}
 
 
+def sort_incidents(incidents, sort_by: str = "severity"):
+    if sort_by == "avg_score":
+        return sorted(
+            incidents,
+            key=lambda inc: (inc.avg_anomaly_score, inc.total_events),
+            reverse=True,
+        )
+
+    if sort_by == "auth_fail_ratio":
+        return sorted(
+            incidents,
+            key=lambda inc: (inc.auth_fail_ratio, inc.auth_failed, inc.total_events),
+            reverse=True,
+        )
+
+    if sort_by == "total_events":
+        return sorted(
+            incidents,
+            key=lambda inc: (inc.total_events, inc.auth_failed, inc.avg_anomaly_score),
+            reverse=True,
+        )
+
+    # default: severity
+    return sorted(
+        incidents,
+        key=lambda inc: (
+            SEVERITY_ORDER.get(getattr(inc, "severity", "low"), 0),
+            inc.avg_anomaly_score,
+            inc.total_events,
+        ),
+        reverse=True,
+    )
+
+
 def filter_incidents_by_thresholds(
     incidents,
     min_severity: str | None = None,
@@ -316,6 +350,11 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         print("No incidents found after applying severity/confidence filters.")
         return
 
+    incidents = sort_incidents(
+        incidents,
+        sort_by=getattr(args, "sort_by", "severity"),
+    )
+
     top = incidents[: args.top]
 
     if getattr(args, "format", "text") == "json":
@@ -329,9 +368,8 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         data = json.dumps(payload, indent=2)
         write_output(data, getattr(args, "output", None))
         return
-    
 
-    print(f"Top {len(top)} IP-based incidents:")
+    print(f"Top {len(top)} IP-based incidents (sorted by {args.sort_by}):")
     for inc in top:
         if inc.first_seen and inc.last_seen:
             time_window = (
@@ -365,11 +403,11 @@ def cmd_incidents(args: argparse.Namespace) -> None:
 
         if getattr(inc, "targeted_users", None):
             print(f"  targeted_users={','.join(inc.targeted_users)}")
-        
+
         summary = summarize_incident(inc)
         print(f"  summary_title={summary.title}")
         print(f"  summary_description={summary.description}")
-        
+
         if getattr(args, "show_timeline", False):
             timeline = build_incident_timeline(inc, sessions, df)
             print("  timeline_begin")
@@ -742,7 +780,12 @@ def main(argv: list[str] | None = None) -> None:
         choices=["low", "medium", "high"],
         help="Only include incidents at or above this confidence level.",
     )
-
+    p_incidents.add_argument(
+        "--sort-by",
+        choices=["severity", "avg_score", "auth_fail_ratio", "total_events"],
+        default="severity",
+        help="Sort incidents before applying --top (default: severity).",
+    )
     p_incidents.set_defaults(func=cmd_incidents)
     
     p_explain = subparsers.add_parser(
