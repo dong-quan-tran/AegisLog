@@ -872,3 +872,17 @@ Use python -m aegislog.ml.train ... from the repo root with actual log paths und
 - Percentile-based thresholding (`--threshold-percentile`) is now the unified mechanism for deciding which sessions are anomalous across `analyze` and `incidents`, reducing configuration drift.
 - Severity and confidence are treated as ordered categorical fields and filtered via a single helper (`filter_incidents_by_thresholds()`), ensuring `incidents` and `report` apply filters consistently.
 - Missing or unknown `confidence` is treated as below any requested `--min-confidence` to avoid showing low-information incidents when the user explicitly requests higher-confidence ones.
+
+
+## 2026-04-11 – AegisLog structural improvements
+
+- CLI
+  - `explain`: now accepts `--min-severity`, `--min-confidence`, and `--first`, selecting incidents after filtering instead of global index.
+  - `incidents`: added `--sort-by` (`severity`, `avg_score`, `auth_fail_ratio`, `total_events`) and show the chosen sort key in the header.
+- Incident model
+  - Group incidents by source IP (with time-window clustering) instead of `(ip, user)` pairs; derive `primary_user` and `targeted_users` per cluster.
+  - Added derived fields: `priority`, `priority_score`, `priority_reason` combining severity and confidence.
+  - Added SSH-specific `attack_pattern` and `attack_pattern_reason` (e.g., `password_spray`, `brute_force`, `possible_compromise`, `low_signal`).
+- Outputs
+  - Surfaced new fields in JSON and text outputs for `incidents`, `explain`, and `report` (`priority_counts`, `attack_pattern_counts`).
+  - Updated CLI cheatsheet to reflect new flags and JSON payload fields.
