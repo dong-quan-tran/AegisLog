@@ -24,9 +24,9 @@ class Incident:
     severity_reason: str
     confidence: str
     confidence_reason: str
-    priority: str            # new: low/medium/high/critical
-    priority_score: int      # new: 0–100 derived score
-    priority_reason: str     # new: explanation
+    priority: str
+    priority_score: int
+    priority_reason: str
     primary_user: Optional[str]
     targeted_users: List[str]
     first_seen: Optional[datetime]
@@ -490,6 +490,11 @@ def build_incident_report(
     confidence_counts = Counter(
         inc.confidence for inc in incidents if inc.confidence
     )
+    priority_counts = Counter(
+        getattr(inc, "priority", None)
+        for inc in incidents
+        if getattr(inc, "priority", None)
+    )
     ip_counts = Counter(inc.ip for inc in incidents if inc.ip)
 
     targeted_user_counts = Counter()
@@ -501,6 +506,7 @@ def build_incident_report(
         "total_incidents": len(incidents),
         "severity_counts": dict(severity_counts),
         "confidence_counts": dict(confidence_counts),
+        "priority_counts": dict(priority_counts),
         "top_incident_ips": [
             {"ip": ip, "incident_count": count}
             for ip, count in ip_counts.most_common(top_n)
