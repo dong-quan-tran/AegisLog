@@ -27,6 +27,8 @@ class Incident:
     priority: str
     priority_score: int
     priority_reason: str
+    attack_pattern: str
+    attack_pattern_reason: str
     primary_user: Optional[str]
     targeted_users: List[str]
     first_seen: Optional[datetime]
@@ -141,6 +143,51 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
         incident_id=incident.incident_id,
         title=title,
         description=description,
+    )
+
+def _classify_attack_pattern(
+    auth_failed: int,
+    auth_success: int,
+    auth_fail_ratio: float,
+    targeted_users: List[str],
+    has_success_after_failures: bool,
+) -> tuple[str, str]:
+    # Possible account compromise: failures then success
+    if has_success_after_failures and auth_success > 0:
+        return (
+            "possible_compromise",
+            "failed SSH authentications followed by successful login(s) for the same source IP",
+        )
+
+    unique_users = len(targeted_users)
+
+    # Username or password spray: many users, all failures
+    if auth_failed >= 100 and unique_users >= 5 and auth_success == 0 and auth_fail_ratio >= 0.9:
+        return (
+            "password_spray",
+            f"high-volume failed SSH authentication attempts ({auth_failed}) against "
+            f"{unique_users} distinct user(s) with no successes",
+        )
+
+    # Classic brute-force on a small user set
+    if auth_failed >= 100 and unique_users <= 3 and auth_fail_ratio >= 0.9:
+        return (
+            "brute_force",
+            f"high-volume failed SSH authentication attempts ({auth_failed}) focused on "
+            f"{unique_users} user(s) with very high failure ratio",
+        )
+
+    # Low-signal background noise
+    if auth_failed < 20 and auth_success == 0:
+        return (
+            "low_signal",
+            "low-volume failed SSH authentication activity without clear brute-force characteristics",
+        )
+
+    # Default
+    return (
+        "suspicious_auth_activity",
+        "SSH authentication pattern shows some suspicious characteristics but does not match a more specific pattern",
     )
 
 
@@ -437,6 +484,14 @@ def group_sessions_to_incidents(
                 has_success_after_failures,
             )
 
+            attack_pattern, attack_pattern_reason = _classify_attack_pattern(
+                auth_failed=total_failed,
+                auth_success=total_success,
+                auth_fail_ratio=auth_fail_ratio,
+                targeted_users=targeted_users,
+                has_success_after_failures=has_success_after_failures,
+            )
+
             priority, priority_score, priority_reason = _compute_priority(
                 severity=severity,
                 confidence=confidence,
@@ -463,6 +518,8 @@ def group_sessions_to_incidents(
                     priority=priority,
                     priority_score=priority_score,
                     priority_reason=priority_reason,
+                    attack_pattern=attack_pattern,
+                    attack_pattern_reason=attack_pattern_reason,
                     first_seen=first_seen,
                     last_seen=last_seen,
                     primary_user=primary_user,
@@ -489,14 +546,23 @@ def build_incident_report(
     top_n: int = 5,
 ) -> dict:
     severity_counts = Counter(inc.severity for inc in incidents)
+    
     confidence_counts = Counter(
         inc.confidence for inc in incidents if inc.confidence
     )
+
     priority_counts = Counter(
         getattr(inc, "priority", None)
         for inc in incidents
         if getattr(inc, "priority", None)
     )
+       
+    attack_pattern_counts = Counter(
+        getattr(inc, "attack_pattern", None)
+        for inc in incidents
+        if getattr(inc, "attack_pattern", None)
+    )
+
     ip_counts = Counter(inc.ip for inc in incidents if inc.ip)
 
     targeted_user_counts = Counter()
@@ -508,6 +574,7 @@ def build_incident_report(
         "total_incidents": len(incidents),
         "severity_counts": dict(severity_counts),
         "confidence_counts": dict(confidence_counts),
+        "attack_pattern_counts": dict(attack_pattern_counts),
         "priority_counts": dict(priority_counts),
         "top_incident_ips": [
             {"ip": ip, "incident_count": count}
