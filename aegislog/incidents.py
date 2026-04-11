@@ -24,6 +24,9 @@ class Incident:
     severity_reason: str
     confidence: str
     confidence_reason: str
+    priority: str            # new: low/medium/high/critical
+    priority_score: int      # new: 0–100 derived score
+    priority_reason: str     # new: explanation
     primary_user: Optional[str]
     targeted_users: List[str]
     first_seen: Optional[datetime]
@@ -139,6 +142,36 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
         title=title,
         description=description,
     )
+
+
+SEVERITY_TO_SCORE = {"low": 25, "medium": 50, "high": 80}
+CONFIDENCE_TO_SCORE = {"low": 30, "medium": 60, "high": 85}
+
+def _compute_priority(
+    severity: str,
+    confidence: str,
+) -> tuple[str, int, str]:
+    sev_score = SEVERITY_TO_SCORE.get(severity, 25)
+    conf_score = CONFIDENCE_TO_SCORE.get(confidence, 30)
+
+    # Simple multiplicative-style combination inspired by risk scoring
+    priority_score = round((sev_score * conf_score) / 100)
+
+    if priority_score >= 68:
+        priority = "critical"
+    elif priority_score >= 45:
+        priority = "high"
+    elif priority_score >= 20:
+        priority = "medium"
+    else:
+        priority = "low"
+
+    reason = (
+        f"priority derived from severity={severity} "
+        f"and confidence={confidence} (score={priority_score})"
+    )
+
+    return priority, priority_score, reason
 
 
 def _compute_severity(
@@ -401,6 +434,11 @@ def group_sessions_to_incidents(
                 has_success_after_failures,
             )
 
+            priority, priority_score, priority_reason = _compute_priority(
+                severity=severity,
+                confidence=confidence,
+            )
+
             suffix = f"{ip}|{user_key}" if user_key else ip
             incident_id = f"ip:{suffix}#{cluster_idx}"
 
@@ -420,10 +458,13 @@ def group_sessions_to_incidents(
                     severity_reason=reason,
                     confidence=confidence,
                     confidence_reason=confidence_reason,
+                    priority=priority,
+                    priority_score=priority_score,
+                    priority_reason=priority_reason,
                     first_seen=first_seen,
                     last_seen=last_seen,
                     primary_user=primary_user,
-                    targeted_users=targeted_users
+                    targeted_users=targeted_users,
                 )
             )
 
