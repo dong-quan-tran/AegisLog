@@ -204,13 +204,30 @@ def cmd_explain(args: argparse.Namespace) -> None:
         print("No incidents found.")
         return
 
-    if args.index < 0 or args.index >= len(incidents):
-        print(f"Invalid index {args.index}. There are {len(incidents)} incident(s).")
+    incidents = filter_incidents_by_thresholds(
+        incidents,
+        min_severity=getattr(args, "min_severity", None),
+        min_confidence=getattr(args, "min_confidence", None),
+    )
+
+    if not incidents:
+        print("No incidents matched the specified severity/confidence filters.")
         return
 
-    inc = incidents[args.index]
+    if getattr(args, "first", False):
+        inc = incidents[0]
+        index = 0
+    else:
+        if args.index < 0 or args.index >= len(incidents):
+            print(
+                f"Invalid index {args.index}. There are {len(incidents)} "
+                f"incident(s) after filtering."
+            )
+            return
+        inc = incidents[args.index]
+        index = args.index
 
-    print(f"Explaining incident at index {args.index}: {inc.incident_id}")
+    print(f"Explaining incident at index {index}: {inc.incident_id}")
     print(
         f"  ip={inc.ip} severity={inc.severity} "
         f"confidence={getattr(inc, 'confidence', 'unknown')} "
@@ -772,6 +789,21 @@ def main(argv: list[str] | None = None) -> None:
         choices=["iforest", "ocsvm", "lof"],
         default="iforest",
         help="Anomaly model to use for scoring.",
+    )
+    p_explain.add_argument(
+        "--min-severity",
+        choices=["low", "medium", "high"],
+        help="Only consider incidents at or above this severity when selecting by index.",
+    )
+    p_explain.add_argument(
+        "--min-confidence",
+        choices=["low", "medium", "high"],
+        help="Only consider incidents at or above this confidence when selecting by index.",
+    )
+    p_explain.add_argument(
+        "--first",
+        action="store_true",
+        help="Explain the first incident after applying any severity/confidence filters.",
     )
     p_explain.set_defaults(func=cmd_explain)
 
