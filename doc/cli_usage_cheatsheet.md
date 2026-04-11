@@ -11,8 +11,8 @@ python -m aegislog.cli analyze data/loghub/SSH.log --log-type ssh_auth --top 10
 # 2) See the worst SSH incidents (medium+ severity)
 python -m aegislog.cli incidents data/loghub/SSH.log --log-type ssh_auth --min-severity medium --top 5
 
-# 3) Get an incident metrics report (for dashboards / tuning)
-python -m aegislog.cli report data/loghub/SSH.log --log-type ssh_auth
+# 3) Explain the highest-severity SSH incident
+python -m aegislog.cli explain data/loghub/SSH.log --log-type ssh_auth --min-severity high --first
 ```
 
 ---
@@ -160,7 +160,17 @@ JSON incidents include:
 
 Explain a single SSH incident with AI-style output.
 
-### Text output (no real LLM call, just prompt)
+### Explain the highest-severity incident
+
+```bash
+python -m aegislog.cli explain \
+  data/loghub/SSH.log \
+  --log-type ssh_auth \
+  --min-severity high \
+  --first
+```
+
+### Explain a specific incident by index
 
 ```bash
 python -m aegislog.cli explain \
@@ -199,8 +209,13 @@ Options:
 - `--log-type`: Currently `ssh_auth` only (default).
 - `--model-path`: Path to SSH anomaly model.  
   Default: `models/log_anomaly_iforest_ssh.joblib`.
-- `--index`: Zero-based index into the sorted incident list.  
+- `--index`: Zero-based index into the incident list after filtering.  
   Default: `0`.
+- `--min-severity`: Only consider incidents at or above this severity when selecting:
+  - `low`, `medium`, `high`.
+- `--min-confidence`: Only consider incidents at or above this confidence when selecting:
+  - `low`, `medium`, `high`.
+- `--first`: Explain the first incident after applying severity/confidence filters.
 - `--use-llm`: Call a real LLM for the explanation (otherwise only prints the constructed prompt).
 - `--format`: `text` (default) or `json`.
 - `--output`: Optional path to write JSON instead of stdout.
