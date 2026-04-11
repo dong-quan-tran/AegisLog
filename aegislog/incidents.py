@@ -337,7 +337,6 @@ def group_sessions_to_incidents(
         if not isinstance(ip, str) or not ip:
             continue
 
-        user_key = user if isinstance(user, str) and user else ""
         incident_key = ip
 
         sess = session_by_id.get(row["session_id"])
@@ -401,7 +400,7 @@ def group_sessions_to_incidents(
             primary_user = Counter(users).most_common(1)[0][0] if users else None
 
             has_success_after_failures = total_failed > 0 and total_success > 0
-            
+
             session_ids = [s["session_id"] for s in cluster]
             timestamps = [s["start_time"] for s in cluster] + [s["end_time"] for s in cluster]
 
@@ -443,14 +442,13 @@ def group_sessions_to_incidents(
                 confidence=confidence,
             )
 
-            suffix = f"{ip}|{user_key}" if user_key else ip
             incident_id = f"ip:{ip}#{cluster_idx}"
 
             incidents.append(
                 Incident(
                     incident_id=incident_id,
                     ip=ip,
-                    user=user_key or None,
+                    user=primary_user,
                     session_ids=session_ids,
                     total_events=total_events,
                     avg_anomaly_score=avg_score,
