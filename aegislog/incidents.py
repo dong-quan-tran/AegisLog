@@ -326,7 +326,7 @@ def group_sessions_to_incidents(
     min_sessions: int = 1,
     merge_window_minutes: int = 60,
 ) -> List[Incident]:
-    by_key: Dict[tuple[str, str], List[dict]] = defaultdict(list)
+    by_key: Dict[str, List[dict]] = defaultdict(list)
     session_by_id: Dict[str, Session] = {s.session_id: s for s in sessions}
     merge_window = timedelta(minutes=merge_window_minutes)
 
@@ -338,7 +338,7 @@ def group_sessions_to_incidents(
             continue
 
         user_key = user if isinstance(user, str) and user else ""
-        incident_key = (ip, user_key)
+        incident_key = ip
 
         sess = session_by_id.get(row["session_id"])
         if not sess:
@@ -360,7 +360,7 @@ def group_sessions_to_incidents(
 
     incidents: List[Incident] = []
 
-    for (ip, user_key), sess_list in by_key.items():
+    for ip, sess_list in by_key.items():
         sess_list.sort(key=lambda s: s["start_time"])
 
         clusters: List[List[dict]] = []
@@ -392,9 +392,13 @@ def group_sessions_to_incidents(
             auth_total = total_failed + total_success
             auth_fail_ratio = total_failed / auth_total if auth_total else 0.0
 
-            users = [s["user"] for s in cluster if isinstance(s.get("user"), str) and s["user"]]
+            users = [
+                s["user"]
+                for s in cluster
+                if isinstance(s.get("user"), str) and s["user"]
+            ]
             targeted_users = sorted(set(users))
-            primary_user = users[0] if users else None
+            primary_user = Counter(users).most_common(1)[0][0] if users else None
 
             has_success_after_failures = total_failed > 0 and total_success > 0
             
@@ -440,7 +444,7 @@ def group_sessions_to_incidents(
             )
 
             suffix = f"{ip}|{user_key}" if user_key else ip
-            incident_id = f"ip:{suffix}#{cluster_idx}"
+            incident_id = f"ip:{ip}#{cluster_idx}"
 
             incidents.append(
                 Incident(
