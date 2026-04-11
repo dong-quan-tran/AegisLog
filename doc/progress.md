@@ -703,3 +703,172 @@ Use python -m aegislog.ml.train ... from the repo root with actual log paths und
 - `Add confidence scoring and reasons to incidents`
 - `Add per-incident session timeline output to CLI`
 - `Surface incident confidence and targeted users in CLI output`
+
+
+# AegisLog – Progress Log
+
+## Date
+
+2026-04-09
+
+## High-level summary
+
+- Improved the `aegislog.cli` UX around anomaly thresholding and incident triage.
+- Added severity/confidence-based filtering for incidents and reports.
+- Updated documentation (`cli_usage_cheatsheet.md`) to match the current CLI surface.
+
+---
+
+## Changes made
+
+### `cli.py`
+
+- Added ordering maps and a shared incident filter:
+  - `SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3}`
+  - `CONFIDENCE_ORDER = {"low": 1, "medium": 2, "high": 3}`
+  - New helper `filter_incidents_by_thresholds(incidents, min_severity, min_confidence)`:
+    - Filters incidents by minimum severity and confidence.
+    - Treats missing confidence as below any requested `min_confidence`.
+
+- `cmd_analyze`:
+  - Integrated `add_threshold_columns()` to compute:
+    - `anomaly_percentile`
+    - `is_anomalous`
+  - Added CLI flags:
+    - `--threshold-percentile` (float, default `99.0`): percentile cut-off for marking sessions anomalous.
+    - `--alerts-only`: filter output down to `is_anomalous=True`.
+  - Ensured JSON output includes scores plus `anomaly_percentile` and `is_anomalous`.
+
+- `cmd_incidents`:
+  - Uses the same thresholding pipeline as `analyze` via `add_threshold_columns()` with a percentile-based cut-off.
+  - Filters the `sessions` list to those present in the scored DataFrame (keeps grouping aligned with thresholded sessions).
+  - Added CLI flags:
+    - `--threshold-percentile`: percentile used before incident grouping.
+    - `--alerts-only`: group incidents only from threshold-flagged anomalous sessions.
+    - `--min-severity`: `low|medium|high` – filter incidents at or above this severity.
+    - `--min-confidence`: `low|medium|high` – filter incidents at or above this confidence.
+    - `--show-timeline`: print a per-incident session timeline ordered by time.
+  - Text output now includes:
+    - `severity`, `severity_reason`
+    - `confidence`, `confidence_reason`
+    - `primary_user`, `targeted_users`
+    - Optional timeline
+    - Summary title and description per incident.
+  - JSON path now returns a bundle:
+    - `incident` (fields including `primary_user`, `targeted_users`)
+    - `summary` (title, description)
+    - `local_explanation`
+    - `llm_prompt` (prompt text)
+
+- `cmd_report`:
+  - Uses `add_threshold_columns()` to label anomalous sessions.
+  - Restricts incident grouping to anomalous sessions only.
+  - Applies `filter_incidents_by_thresholds()` so reports can be scoped by:
+    - `--min-severity`
+    - `--min-confidence`
+  - Text output prints:
+    - `total_sessions`
+    - `anomalous_sessions`
+    - `anomalous_session_percent`
+    - `total_incidents`
+    - `severity_counts`
+    - `confidence_counts`
+    - `top_incident_ips`
+    - `top_targeted_users`
+  - JSON output returns the same information as a structured dict.
+
+- `cmd_explain`:
+  - Uses grouped incidents and prints a richer header:
+    - `severity`, `confidence`, `severity_reason`, `confidence_reason`
+    - session counts, event totals, failure ratios, anomaly scores
+  - JSON output reuses `incident_to_dict()` for consistency across `explain` and `incidents`.
+
+- Parser updates:
+  - `analyze`:
+    - Added `--threshold-percentile`, `--alerts-only`.
+    - Kept `--multi-score`, `--profile`, and `--model-type`.
+  - `incidents`:
+    - Added `--threshold-percentile`, `--alerts-only`, `--min-severity`, `--min-confidence`, `--show-timeline`.
+    - Moved `set_defaults(func=cmd_incidents)` to the end of the parser block for readability.
+  - `report`:
+    - Added `--multi-score`, `--threshold-percentile`, `--min-severity`, `--min-confidence`.
+    - `set_defaults(func=cmd_report)` at the end of its argument block.
+
+---
+
+### `cli_usage_cheatsheet.md`
+
+- Added a **Quick start** section with three common commands:
+
+  - Analyze noisy sessions:
+
+    ```bash
+    python -m aegislog.cli analyze data/loghub/SSH.log --log-type ssh_auth --top 10
+    ```
+
+  - See worst SSH incidents (medium+ severity):
+
+    ```bash
+    python -m aegislog.cli incidents data/loghub/SSH.log --log-type ssh_auth --min-severity medium --top 5
+    ```
+
+  - Get an incident metrics report:
+
+    ```bash
+    python -m aegislog.cli report data/loghub/SSH.log --log-type ssh_auth
+    ```
+
+- Documented new flags:
+  - `analyze`:
+    - `--threshold-percentile`
+    - `--alerts-only`
+    - `--multi-score`
+    - `--profile`
+  - `incidents`:
+    - `--threshold-percentile`
+    - `--alerts-only`
+    - `--min-severity`
+    - `--min-confidence`
+    - `--show-timeline`
+  - `report`:
+    - `--multi-score`
+    - `--threshold-percentile`
+    - `--min-severity`
+    - `--min-confidence`
+- Clarified JSON payloads:
+  - Incidents: incident + summary + local explanation + LLM prompt.
+  - Report: sessions, anomalous stats, incident counts, distributions, top IPs/users.
+
+---
+
+## Behavior verified
+
+- `python -m aegislog.cli analyze data/loghub/SSH.log --log-type ssh_auth --top 10`
+  - Shows top sessions with `anomaly_percentile` and `is_anomalous`.
+
+- `python -m aegislog.cli analyze ... --alerts-only`
+  - Filters to `is_anomalous=True` only.
+
+- `python -m aegislog.cli incidents data/loghub/SSH.log --log-type ssh_auth --min-severity high`
+  - Returns only `severity=high` incidents (large brute-force patterns, medium confidence).
+
+- `python -m aegislog.cli incidents ... --min-confidence high`
+  - Returns low-severity but high-confidence incidents (failed-then-successful logins, likely compromise patterns).
+
+- `python -m aegislog.cli report data/loghub/SSH.log --log-type ssh_auth --min-confidence high`
+  - Correctly prints “No incidents matched…” given all incidents currently have `confidence=medium`.
+
+- `python -m aegislog.cli report data/loghub/SSH.log --log-type ssh_auth --min-severity medium --min-confidence medium --format json`
+  - Returns JSON summary for 109 incidents (medium + high severity, all medium confidence), including:
+    - `total_sessions`, `anomalous_sessions`, `anomalous_session_percent`
+    - `total_incidents`
+    - `severity_counts`, `confidence_counts`
+    - `top_incident_ips`, `top_targeted_users`
+
+---
+
+## Notes / rationale
+
+- Percentile-based thresholding (`--threshold-percentile`) is now the unified mechanism for deciding which sessions are anomalous across `analyze` and `incidents`, reducing configuration drift.
+- Severity and confidence are treated as ordered categorical fields and filtered via a single helper (`filter_incidents_by_thresholds()`), ensuring `incidents` and `report` apply filters consistently.
+- Missing or unknown `confidence` is treated as below any requested `--min-confidence` to avoid showing low-information incidents when the user explicitly requests higher-confidence ones.
