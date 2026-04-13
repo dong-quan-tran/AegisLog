@@ -31,9 +31,13 @@ SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3}
 CONFIDENCE_ORDER = {"low": 1, "medium": 2, "high": 3}
 
 
-def filter_incidents_by_patterns(incidents, patterns: list[str] | None = None):
+def filter_incidents_by_patterns(
+    incidents,
+    patterns: list[str] | None = None,
+):
     if not patterns:
         return incidents
+
     allowed = set(patterns)
     return [
         inc
@@ -259,8 +263,13 @@ def cmd_explain(args: argparse.Namespace) -> None:
         min_confidence=getattr(args, "min_confidence", None),
     )
 
+    incidents = filter_incidents_by_patterns(
+        incidents,
+        patterns=getattr(args, "patterns", None),
+    )
+
     if not incidents:
-        print("No incidents matched the specified severity/confidence filters.")
+        print("No incidents matched the specified severity/confidence/pattern filters.")
         return
 
     if getattr(args, "first", False):
@@ -375,9 +384,9 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         incidents,
         patterns=getattr(args, "patterns", None),
     )
-    
+
     if not incidents:
-        print("No incidents found after applying severity/confidence filters.")
+        print("No incidents found after applying severity/confidence/pattern filters.")
         return
 
     incidents = sort_incidents(
@@ -613,8 +622,13 @@ def cmd_report(args: argparse.Namespace) -> None:
         min_confidence=getattr(args, "min_confidence", None),
     )
 
+    incidents = filter_incidents_by_patterns(
+        incidents,
+        patterns=getattr(args, "patterns", None),
+    )
+
     if not incidents:
-        print("No incidents matched the specified severity/confidence filters.")
+        print("No incidents matched the specified severity/confidence/pattern filters.")
         return
 
     report = build_incident_report(
@@ -900,7 +914,23 @@ def main(argv: list[str] | None = None) -> None:
     p_explain.add_argument(
         "--first",
         action="store_true",
-        help="Explain the first incident after applying any severity/confidence filters.",
+        help="Explain the first incident after applying any severity/confidence/pattern filters.",
+    )
+    p_explain.add_argument(
+        "--pattern",
+        dest="patterns",
+        choices=[
+            "brute_force",
+            "password_spray",
+            "possible_compromise",
+            "low_signal",
+            "suspicious_auth_activity",
+        ],
+        action="append",
+        help=(
+            "Only consider incidents whose attack_pattern matches one of the "
+            "given values; can be specified multiple times."
+        ),
     )
     p_explain.set_defaults(func=cmd_explain)
 
@@ -962,6 +992,22 @@ def main(argv: list[str] | None = None) -> None:
         "--min-confidence",
         choices=["low", "medium", "high"],
         help="Only include incidents at or above this confidence level in the report.",
+    )
+    p_report.add_argument(
+        "--pattern",
+        dest="patterns",
+        choices=[
+            "brute_force",
+            "password_spray",
+            "possible_compromise",
+            "low_signal",
+            "suspicious_auth_activity",
+        ],
+        action="append",
+        help=(
+            "Only include incidents whose attack_pattern matches one of the "
+            "given values in the report; can be specified multiple times."
+        ),
     )
     p_report.set_defaults(func=cmd_report)
     args = parser.parse_args(argv)
