@@ -197,8 +197,8 @@ def incident_to_dict(inc, summary, explanation, llm_prompt) -> dict:
             "auth_fail_ratio": inc.auth_fail_ratio,
             "first_seen": inc.first_seen.isoformat() if inc.first_seen else None,
             "last_seen": inc.last_seen.isoformat() if inc.last_seen else None,
-            "primary_user": inc.primary_user,
-            "targeted_users": inc.targeted_users,
+            "primary_user": getattr(inc, "primary_user", None),
+            "targeted_users": getattr(inc, "targeted_users", []),
         },
         "summary": {
             "title": summary.title,
