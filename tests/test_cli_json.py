@@ -71,3 +71,45 @@ def test_incident_to_dict_returns_expected_shape():
     assert data["llm_prompt"] == "Explain this incident"
     assert data["incident"]["first_seen"] == "2025-01-01T12:00:00"
     assert data["incident"]["last_seen"] == "2025-01-01T12:30:00"
+
+
+def test_incident_to_dict_includes_priority_and_attack_pattern_fields():
+    inc = SimpleNamespace(
+        incident_id="ip:1.2.3.4#1",
+        ip="1.2.3.4",
+        severity="high",
+        severity_reason="test severity reason",
+        confidence="high",
+        confidence_reason="test confidence reason",
+        priority="critical",
+        priority_score=68,
+        priority_reason="derived from severity/confidence",
+        attack_pattern="password_spray",
+        attack_pattern_reason="many users targeted",
+        session_ids=["1.2.3.4||1"],
+        total_events=12,
+        avg_anomaly_score=0.123,
+        auth_failed=10,
+        auth_success=0,
+        auth_fail_ratio=1.0,
+        first_seen=datetime(2025, 1, 1, 12, 0, 0),
+        last_seen=datetime(2025, 1, 1, 12, 30, 0),
+        primary_user="user1",
+        targeted_users=["user1", "user2"],
+    )
+    summary = SimpleNamespace(
+        title="Test incident",
+        description="Test description",
+    )
+    llm_prompt = SimpleNamespace(
+        prompt="Explain this incident",
+    )
+
+    data = incident_to_dict(inc, summary, "Local explanation text", llm_prompt)
+
+    assert data["incident"]["priority"] == "critical"
+    assert data["incident"]["priority_score"] == 68
+    assert data["incident"]["attack_pattern"] == "password_spray"
+    assert data["incident"]["primary_user"] == "user1"
+    assert data["incident"]["targeted_users"] == ["user1", "user2"]
+    
