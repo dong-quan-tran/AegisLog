@@ -238,21 +238,63 @@ def timeline_entry_to_dict(entry) -> dict:
     }
 
 
-def cmd_explain(args: argparse.Namespace) -> None:
-    if args.log_type != "ssh_auth":
-        print("Currently, explain is only implemented for ssh_auth logs.")
-        return
+def load_ssh_incidents_for_cli(
+    args: argparse.Namespace,
+    *,
+    anomalous_only: bool = False,
+    restrict_sessions_to_df: bool = True,
+):
+    """
+    Shared helper for SSH incident commands.
 
+    Parameters
+    ----------
+    anomalous_only:
+        If True, keep only sessions flagged as anomalous after thresholding.
+    restrict_sessions_to_df:
+        If True, keep only Session objects whose session_id appears in the
+        post-filter DataFrame before grouping incidents.
+    """
     events = parse_ssh_file(args.log_path)
     sessions = build_sessions(events)
     model_path = resolve_model_path(args)
     df = score_sessions(sessions, model_path=model_path)
 
     if df.empty:
+        return sessions, df, []
+
+    sort_col = "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
+    df = add_threshold_columns(
+        df,
+        score_col=sort_col,
+        threshold_percentile=getattr(args, "threshold_percentile", 99.0),
+    )
+
+    if anomalous_only:
+        df = df[df["is_anomalous"]]
+        if df.empty:
+            return sessions, df, []
+
+    if restrict_sessions_to_df:
+        allowed_ids = set(df["session_id"].tolist())
+        sessions = [s for s in sessions if s.session_id in allowed_ids]
+
+    incidents = group_sessions_to_incidents(sessions, df)
+    return sessions, df, incidents
+
+
+
+def cmd_explain(args: argparse.Namespace) -> None:
+    if args.log_type != "ssh_auth":
+        print("Currently, explain is only implemented for ssh_auth logs.")
+        return
+
+    sessions, df, incidents = load_ssh_incidents_for_cli(args)
+
+    if df.empty:
         print("No sessions found.")
         return
 
-    incidents = group_sessions_to_incidents(sessions, df)
     if not incidents:
         print("No incidents found.")
         return
@@ -349,27 +391,16 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         print("Currently, incidents are only implemented for ssh_auth logs.")
         return
 
-    events = parse_ssh_file(args.log_path)
-    sessions = build_sessions(events)
-    model_path = resolve_model_path(args)
-    df = score_sessions(sessions, model_path=model_path)
+    sessions, df, incidents = load_ssh_incidents_for_cli(
+        args,
+        anomalous_only=getattr(args, "alerts_only", False),
+        restrict_sessions_to_df=True,
+    )
 
     if df.empty:
         print("No sessions found.")
         return
 
-    sort_col = "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
-    df = add_threshold_columns(
-        df,
-        score_col=sort_col,
-        threshold_percentile=args.threshold_percentile,
-    )
-
-    # keep only sessions that survived any filtering
-    allowed_ids = set(df["session_id"].tolist())
-    sessions = [s for s in sessions if s.session_id in allowed_ids]
-
-    incidents = group_sessions_to_incidents(sessions, df)
     if not incidents:
         print("No incidents found.")
         return
