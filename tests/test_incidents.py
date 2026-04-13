@@ -211,3 +211,34 @@ def test_group_sessions_to_incidents_possible_compromise():
     assert inc.attack_pattern == "possible_compromise"
     assert inc.auth_success == 1
     assert inc.has_success_after_failures is True
+
+
+def test_group_sessions_to_incidents_ip_centric_spray():
+    from datetime import datetime, timedelta
+
+    base = datetime(2025, 1, 1, 0, 0, 0)
+    sessions = [
+        make_session("s1", "1.2.3.4", "user1", base, base + timedelta(minutes=5)),
+        make_session("s2", "1.2.3.4", "user2", base + timedelta(minutes=10), base + timedelta(minutes=15)),
+        make_session("s3", "1.2.3.4", "user3", base + timedelta(minutes=20), base + timedelta(minutes=25)),
+        make_session("s4", "1.2.3.4", "user4", base + timedelta(minutes=30), base + timedelta(minutes=35)),
+        make_session("s5", "1.2.3.4", "user5", base + timedelta(minutes=40), base + timedelta(minutes=45)),
+    ]
+
+    scores_df = pd.DataFrame(
+        [
+            {"session_id": "s1", "ip": "1.2.3.4", "user": "user1", "event_count": 100, "anomaly_score": 0.30, "auth_failed": 80, "auth_success": 0},
+            {"session_id": "s2", "ip": "1.2.3.4", "user": "user2", "event_count": 100, "anomaly_score": 0.29, "auth_failed": 80, "auth_success": 0},
+            {"session_id": "s3", "ip": "1.2.3.4", "user": "user3", "event_count": 100, "anomaly_score": 0.31, "auth_failed": 80, "auth_success": 0},
+            {"session_id": "s4", "ip": "1.2.3.4", "user": "user4", "event_count": 100, "anomaly_score": 0.28, "auth_failed": 80, "auth_success": 0},
+            {"session_id": "s5", "ip": "1.2.3.4", "user": "user5", "event_count": 100, "anomaly_score": 0.30, "auth_failed": 80, "auth_success": 0},
+        ]
+    )
+
+    incidents = group_sessions_to_incidents(sessions, scores_df)
+
+    assert len(incidents) == 1
+    inc = incidents[0]
+    assert inc.attack_pattern == "password_spray"
+    assert set(inc.targeted_users) == {"user1", "user2", "user3", "user4", "user5"}
+    assert inc.primary_user in inc.targeted_users
