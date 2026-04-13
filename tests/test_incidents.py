@@ -84,13 +84,21 @@ def test_compute_priority_from_severity_and_confidence():
 
 
 def test_compute_priority_other_combinations():
-    # medium + medium => round(50*60/100)=30 => medium
-    p1, s1, _ = _compute_priority("medium", "medium")
-    assert (p1, s1) == ("medium", 30)
+    # medium + medium -> round(50 * 60 / 100) = 30 -> "medium"
+    priority, score, _ = _compute_priority(
+        severity="medium",
+        confidence="medium",
+    )
+    assert priority == "medium"
+    assert score == 30
 
-    # low + low => round(25*30/100)=8 => low
-    p2, s2, _ = _compute_priority("low", "low")
-    assert (p2, s2) == ("low", 8)
+    # low + low -> round(25 * 30 / 100) = 8 -> "low"
+    priority2, score2, _ = _compute_priority(
+        severity="low",
+        confidence="low",
+    )
+    assert priority2 == "low"
+    assert score2 == 8
 
 
 def test_classify_attack_pattern_bruteforce():
