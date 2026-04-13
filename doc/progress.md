@@ -886,3 +886,102 @@ Use python -m aegislog.ml.train ... from the repo root with actual log paths und
 - Outputs
   - Surfaced new fields in JSON and text outputs for `incidents`, `explain`, and `report` (`priority_counts`, `attack_pattern_counts`).
   - Updated CLI cheatsheet to reflect new flags and JSON payload fields.
+
+# AegisLog – Progress Log (04/13/2026)
+
+## CLI: Attack pattern filtering
+
+- Added a `--pattern` option (multi-value via `action="append"`) to:
+  - `incidents` (filter incidents by `attack_pattern`).
+  - `explain` (limit candidate incidents before selection).
+  - `report` (scope reports to specific `attack_pattern` types).
+- Implemented `filter_incidents_by_patterns(incidents, patterns)` in the CLI and wired it into:
+  - `cmd_incidents` after severity/confidence filtering.
+  - `cmd_explain` after severity/confidence filtering.
+  - `cmd_report` after severity/confidence filtering.
+- Updated “no incidents” messages to mention pattern filters where appropriate.
+
+## CLI: Incident loading refactor
+
+- Introduced a shared helper in `cli.py`:
+
+  ```python
+  load_ssh_incidents_for_cli(
+      args,
+      *,
+      anomalous_only: bool = False,
+      restrict_sessions_to_df: bool = True,
+  )
+  ```
+
+  This helper:
+  - Parses SSH logs and builds sessions.
+  - Scores sessions with the chosen model.
+  - Applies anomaly thresholding using `threshold_percentile` (with a safe default when missing).
+  - Optionally filters to anomalous sessions only (`anomalous_only`).
+  - Optionally restricts the `Session` list to IDs present in the post-filter DataFrame.
+  - Groups sessions into incidents via `group_sessions_to_incidents`.
+
+- Refactored `cmd_incidents` to use the helper:
+
+  ```python
+  sessions, df, incidents = load_ssh_incidents_for_cli(
+      args,
+      anomalous_only=getattr(args, "alerts_only", False),
+      restrict_sessions_to_df=True,
+  )
+  ```
+
+  - This now cleanly wires `--alerts-only` into the grouping path.
+
+- Refactored `cmd_explain` to use the same helper:
+
+  ```python
+  sessions, df, incidents = load_ssh_incidents_for_cli(args)
+  ```
+
+  - Behavior:
+    - Uses the shared thresholding logic.
+    - Keeps all sessions represented in the post-threshold DataFrame.
+    - Then applies `--min-severity`, `--min-confidence`, and `--pattern` as before.
+  - Fixed a bug where `explain` lacked `threshold_percentile` by switching to:
+
+    ```python
+    threshold_percentile=getattr(args, "threshold_percentile", 99.0)
+    ```
+
+    inside the helper.
+
+## Tests: Integration and JSON shape
+
+- Extended `tests/test_cli_incidents_integration.py`:
+  - Kept `test_incidents_ssh_json_output` to assert base JSON shape.
+  - Added `test_incidents_ssh_json_output_filtered_by_pattern`:
+    - Runs `incidents` in JSON mode with `--pattern password_spray`.
+    - If any incidents are returned, asserts:
+      - `attack_pattern == "password_spray"`.
+      - `priority` is one of `{"low", "medium", "high", "critical"}`.
+      - `priority_score` is an `int` and `priority_reason` is a non-empty string.
+
+- Extended `tests/test_cli_explain_integration.py`:
+  - Kept `test_explain_ssh_json_output` to assert base JSON shape.
+  - Added `test_explain_ssh_json_output_filtered_by_pattern`:
+    - Runs `explain` in JSON mode with `--first` and `--pattern password_spray`.
+    - Asserts presence of core fields and that:
+      - `attack_pattern == "password_spray"`.
+      - `priority` is one of `{"low", "medium", "high", "critical"}`.
+      - `priority_score` is an `int` and `priority_reason` is a non-empty string.
+
+## Tests: Helper behavior
+
+- Strengthened `_compute_priority` tests in `test_incidents.py`:
+  - Now assert exact `(priority, score)` for key combinations like:
+    - `("high", "high") -> ("critical", 68)`.
+    - `("medium", "medium") -> ("medium", 30)`.
+    - `("low", "low") -> ("low", 8)`.
+
+## Commits (summary-level)
+
+- Add attack pattern filters to `incidents`, `explain`, and `report` CLI commands.
+- Expand integration tests to verify `attack_pattern` and priority fields in JSON.
+- Refactor SSH incident commands to use a shared `load_ssh_incidents_for_cli` helper and wire `--alerts-only` through it.
