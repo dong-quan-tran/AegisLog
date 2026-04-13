@@ -31,6 +31,17 @@ SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3}
 CONFIDENCE_ORDER = {"low": 1, "medium": 2, "high": 3}
 
 
+def filter_incidents_by_patterns(incidents, patterns: list[str] | None = None):
+    if not patterns:
+        return incidents
+    allowed = set(patterns)
+    return [
+        inc
+        for inc in incidents
+        if getattr(inc, "attack_pattern", None) in allowed
+    ]
+
+
 def sort_incidents(incidents, sort_by: str = "severity"):
     if sort_by == "avg_score":
         return sorted(
@@ -360,6 +371,11 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         min_confidence=getattr(args, "min_confidence", None),
     )
 
+    incidents = filter_incidents_by_patterns(
+        incidents,
+        patterns=getattr(args, "patterns", None),
+    )
+    
     if not incidents:
         print("No incidents found after applying severity/confidence filters.")
         return
@@ -807,6 +823,22 @@ def main(argv: list[str] | None = None) -> None:
         choices=["severity", "avg_score", "auth_fail_ratio", "total_events"],
         default="severity",
         help="Sort incidents before applying --top (default: severity).",
+    )
+    p_incidents.add_argument(
+        "--pattern",
+        dest="patterns",
+        choices=[
+            "brute_force",
+            "password_spray",
+            "possible_compromise",
+            "low_signal",
+            "suspicious_auth_activity",
+        ],
+        action="append",
+        help=(
+            "Filter incidents by attack pattern; can be specified multiple "
+            "times (e.g. --pattern brute_force --pattern password_spray)."
+        ),
     )
     p_incidents.set_defaults(func=cmd_incidents)
     
