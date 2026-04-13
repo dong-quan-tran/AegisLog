@@ -170,3 +170,44 @@ def test_group_sessions_to_incidents_ip_centric_spray():
     assert inc.attack_pattern in {"password_spray", "brute_force"}
     assert isinstance(inc.priority_score, int)
     assert inc.priority in {"low", "medium", "high", "critical"}
+
+
+def test_group_sessions_to_incidents_possible_compromise():
+    from datetime import datetime, timedelta
+
+    base = datetime(2025, 1, 1, 0, 0, 0)
+    sessions = [
+        make_session("s1", "5.6.7.8", "alice", base, base + timedelta(minutes=5)),
+        make_session("s2", "5.6.7.8", "alice", base + timedelta(minutes=10), base + timedelta(minutes=12)),
+    ]
+
+    scores_df = pd.DataFrame(
+        [
+            {
+                "session_id": "s1",
+                "ip": "5.6.7.8",
+                "user": "alice",
+                "event_count": 100,
+                "anomaly_score": 0.30,
+                "auth_failed": 40,
+                "auth_success": 0,
+            },
+            {
+                "session_id": "s2",
+                "ip": "5.6.7.8",
+                "user": "alice",
+                "event_count": 20,
+                "anomaly_score": 0.25,
+                "auth_failed": 5,
+                "auth_success": 1,
+            },
+        ]
+    )
+
+    incidents = group_sessions_to_incidents(sessions, scores_df)
+
+    assert len(incidents) == 1
+    inc = incidents[0]
+    assert inc.attack_pattern == "possible_compromise"
+    assert inc.auth_success == 1
+    assert inc.has_success_after_failures is True
