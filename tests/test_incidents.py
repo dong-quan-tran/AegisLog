@@ -71,14 +71,26 @@ def test_compute_confidence_low_signal():
 
 
 def test_compute_priority_from_severity_and_confidence():
+    # SEVERITY_TO_SCORE["high"] = 80, CONFIDENCE_TO_SCORE["high"] = 85
+    # priority_score = round(80 * 85 / 100) = 68 => "critical"
     priority, score, reason = _compute_priority(
         severity="high",
         confidence="high",
     )
-    assert priority in {"high", "critical"}
-    assert isinstance(score, int)
+    assert priority == "critical"
+    assert score == 68
     assert "severity=high" in reason
     assert "confidence=high" in reason
+
+
+def test_compute_priority_other_combinations():
+    # medium + medium => round(50*60/100)=30 => medium
+    p1, s1, _ = _compute_priority("medium", "medium")
+    assert (p1, s1) == ("medium", 30)
+
+    # low + low => round(25*30/100)=8 => low
+    p2, s2, _ = _compute_priority("low", "low")
+    assert (p2, s2) == ("low", 8)
 
 
 def test_classify_attack_pattern_bruteforce():
