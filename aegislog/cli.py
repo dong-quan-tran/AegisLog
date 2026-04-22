@@ -611,28 +611,18 @@ def cmd_report(args: argparse.Namespace) -> None:
         print("Currently, report is only implemented for ssh_auth logs.")
         return
 
-    events = parse_ssh_file(args.log_path)
-    sessions = build_sessions(events)
+    # Load and score sessions, then group into incidents using the shared helper.
+    sessions, df, incidents = load_ssh_incidents_for_cli(
+        args,
+        anomalous_only=True,          # report is about anomalous sessions only
+        restrict_sessions_to_df=True, # keep sessions aligned with df
+    )
 
     total_sessions = len(sessions)
-
-    if getattr(args, "multi_score", False):
-        model_paths = resolve_multi_model_paths(args)
-        df = score_sessions_multi(sessions, model_paths=model_paths, add_ensemble=True)
-    else:
-        model_path = resolve_model_path(args)
-        df = score_sessions(sessions, model_path=model_path)
 
     if df.empty:
         print("No sessions found.")
         return
-
-    sort_col = "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
-    df = add_threshold_columns(
-        df,
-        score_col=sort_col,
-        threshold_percentile=args.threshold_percentile,
-    )
 
     anomalous_df = df[df["is_anomalous"]]
     anomalous_sessions = len(anomalous_df)
@@ -640,12 +630,6 @@ def cmd_report(args: argparse.Namespace) -> None:
     if anomalous_sessions == 0:
         print("No anomalous sessions found; no incidents to report.")
         return
-
-    # Keep only anomalous sessions for incident grouping
-    allowed_ids = set(anomalous_df["session_id"].tolist())
-    sessions_filtered = [s for s in sessions if s.session_id in allowed_ids]
-
-    incidents = group_sessions_to_incidents(sessions_filtered, anomalous_df)
 
     incidents = filter_incidents_by_thresholds(
         incidents,
@@ -678,7 +662,7 @@ def cmd_report(args: argparse.Namespace) -> None:
     print(f"  total_sessions={report.get('total_sessions', 0)}")
     print(f"  anomalous_sessions={report.get('anomalous_sessions', 0)}")
     print(
-        f"  anomalous_session_percent="
+        "  anomalous_session_percent="
         f"{report.get('anomalous_session_percent', 0.0):.2f}"
     )
     print(f"  total_incidents={report['total_incidents']}")
