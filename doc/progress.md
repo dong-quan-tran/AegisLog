@@ -985,3 +985,61 @@ Use python -m aegislog.ml.train ... from the repo root with actual log paths und
 - Add attack pattern filters to `incidents`, `explain`, and `report` CLI commands.
 - Expand integration tests to verify `attack_pattern` and priority fields in JSON.
 - Refactor SSH incident commands to use a shared `load_ssh_incidents_for_cli` helper and wire `--alerts-only` through it.
+
+
+# AegisLog – Progress Log (2026‑04‑21)
+
+## CLI internals and refactors
+
+- **Shared SSH incident loader**
+  - Confirmed `cmd_incidents`, `cmd_explain`, and `cmd_report` all use the shared `load_ssh_incidents_for_cli()` helper.
+  - Report now reuses the same scoring, thresholding, anomalous filtering, and grouping behavior as incidents/explain instead of duplicating logic.
+
+- **Explain command threshold support**
+  - Exposed `--threshold-percentile` on the `explain` subcommand, keeping it consistent with `analyze`, `incidents`, and `report`.
+  - Kept the helper’s `getattr(args, "threshold_percentile", 99.0)` behavior, so explain now cleanly accepts a custom percentile while defaulting to 99.0.
+
+## Tests and integration coverage
+
+- **Report JSON integration tests**
+  - Added `tests/test_cli_report_integration.py` with:
+    - A base JSON shape test for `report` on SSH logs.
+    - A `--pattern password_spray` test asserting that `attack_pattern_counts` and `total_incidents` are scoped to the selected pattern when any incidents exist.
+    - A combined `--min-severity`, `--min-confidence`, and `--pattern` test to ensure counts only appear in allowed severity/confidence buckets and match the requested pattern.
+
+- **Explain JSON integration tests**
+  - Extended `tests/test_cli_explain_integration.py` to cover:
+    - JSON output structure for `explain` on SSH logs.
+    - A run using a custom `--threshold-percentile` to ensure the flag is accepted and that JSON output is produced correctly.
+
+- **Test status**
+  - All existing and new CLI integration tests pass:
+    - analyze / incidents / explain / report JSON flows.
+    - Filtering by severity, confidence, and attack pattern.
+    - Custom threshold-percentile handling across commands.
+
+## Design work for Apache incidents
+
+- **Apache incident concept (design only, no code yet)**
+  - Decided that Apache incidents will also be **IP-based groupings** of anomalous sessions, analogous to SSH, but driven by web-specific behavior.
+  - Sketched initial Apache `attack_pattern` categories:
+    - `scanner_activity` – broad probing from a source IP hitting many distinct paths.
+    - `missing_resource_burst` – bursts dominated by missing-resource/404-style activity.
+    - `exploit_probe` – suspicious or exploit-looking paths/payloads (e.g., admin panels, config/env files, web-shell targets).
+    - `server_error_trigger` – repeated activity correlated with 5xx/server-side failures.
+    - `low_signal_web_noise` – anomalous but ambiguous web activity with weak evidence.
+  - Outlined that Apache severity/confidence will reuse the same top-level fields as SSH but be driven by:
+    - volume and concentration of activity per IP,
+    - presence of suspicious paths/payloads,
+    - status-code patterns (404/5xx bursts),
+    - repetition and focus of the behavior.
+
+## “Tomorrow’s plan” (next steps)
+
+- Add Apache-specific constants and stubs:
+  - Introduce `APACHE_ATTACK_PATTERNS` and a `classify_apache_attack_pattern(...)` stub that currently returns `low_signal_web_noise`.
+  - Document intended heuristics in a module comment/docstring so the design is captured in code.
+- Later, wire Apache incidents into:
+  - `aegislog.incidents` (grouping + pattern classification).
+  - CLI commands (conditional support for `--log-type apache_error` in `incidents` and `report` once behavior is implemented).  
+
