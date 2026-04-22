@@ -917,6 +917,15 @@ def main(argv: list[str] | None = None) -> None:
         help="Anomaly model to use for scoring.",
     )
     p_explain.add_argument(
+        "--threshold-percentile",
+        type=float,
+        default=99.0,
+        help=(
+            "Percentile threshold for flagging anomalous sessions before "
+            "grouping incidents for explanation (default: 99.0)."
+        ),
+    )
+    p_explain.add_argument(
         "--min-severity",
         choices=["low", "medium", "high"],
         help="Only consider incidents at or above this severity when selecting by index.",
