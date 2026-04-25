@@ -21,7 +21,7 @@ from aegislog.incidents import (
     group_sessions_to_incidents,
     summarize_incident,
     build_incident_timeline,
-    build_incident_report
+    build_incident_report,
 )
 
 from aegislog.ai_client import call_llm_for_incident, LLMConfigError
@@ -283,6 +283,74 @@ def load_ssh_incidents_for_cli(
     return sessions, df, incidents
 
 
+# ---- Parser helpers -----------------------------------------------------
+
+
+def add_ssh_source_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("log_path", help="Path to log file.")
+    parser.add_argument(
+        "--log-type",
+        choices=["ssh_auth"],
+        default="ssh_auth",
+        help="Type of log file to parse (currently ssh_auth only).",
+    )
+    parser.add_argument(
+        "--model-path",
+        default=None,
+        help="Path to trained model (defaults depend on log-type/model-type).",
+    )
+    parser.add_argument(
+        "--model-type",
+        choices=["iforest", "ocsvm", "lof"],
+        default="iforest",
+        help="Anomaly model to use for scoring.",
+    )
+
+
+def add_json_output_args(parser: argparse.ArgumentParser, noun: str) -> None:
+    parser.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help=f"Output format for {noun} (default: text).",
+    )
+    parser.add_argument(
+        "--output",
+        help="Optional path to write JSON output instead of stdout.",
+    )
+
+
+def add_incident_filter_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--min-severity",
+        choices=["low", "medium", "high"],
+        help="Only include incidents at or above this severity.",
+    )
+    parser.add_argument(
+        "--min-confidence",
+        choices=["low", "medium", "high"],
+        help="Only include incidents at or above this confidence level.",
+    )
+    parser.add_argument(
+        "--pattern",
+        dest="patterns",
+        choices=[
+            "brute_force",
+            "password_spray",
+            "possible_compromise",
+            "low_signal",
+            "suspicious_auth_activity",
+        ],
+        action="append",
+        help=(
+            "Filter incidents by attack pattern; can be specified multiple "
+            "times."
+        ),
+    )
+
+
+# ---- Command implementations -------------------------------------------
+
 
 def cmd_explain(args: argparse.Namespace) -> None:
     if args.log_type != "ssh_auth":
@@ -342,13 +410,13 @@ def cmd_explain(args: argparse.Namespace) -> None:
 
     if getattr(inc, "severity_reason", None):
         print(f"  severity_reason={inc.severity_reason}")
-    
+
     if getattr(inc, "confidence_reason", None):
         print(f"  confidence_reason={inc.confidence_reason}")
-    
+
     if getattr(inc, "priority_reason", None):
         print(f"  priority_reason={inc.priority_reason}")
-    
+
     if getattr(inc, "attack_pattern_reason", None):
         print(f"  attack_pattern_reason={inc.attack_pattern_reason}")
 
@@ -368,7 +436,7 @@ def cmd_explain(args: argparse.Namespace) -> None:
         data = json.dumps(payload, indent=2)
         write_output(data, getattr(args, "output", None))
         return
-    
+
     if getattr(args, "use_llm", False):
         try:
             llm_response = call_llm_for_incident(llm_prompt)
@@ -518,11 +586,13 @@ def cmd_incidents(args: argparse.Namespace) -> None:
                 print(f"    {line}")
             print("  llm_prompt_end")
 
+
 def cmd_examples(args: argparse.Namespace) -> None:
     print("Example commands:")
     print("  aegislog analyze data/loghub/SSH.log --log-type ssh_auth --profile ssh")
     print("  aegislog incidents data/loghub/SSH.log --log-type ssh_auth")
     print("  aegislog explain data/loghub/SSH.log --log-type ssh_auth --index 0")
+
 
 def cmd_init(args: argparse.Namespace) -> None:
     print("Init placeholder: will set up SQLite experiment DB.")
@@ -592,7 +662,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
             f"error_ratio={row['error_ratio']:.2f}",
             f"anomaly_score={row['anomaly_score']:.3f}",
             f"anomaly_percentile={row['anomaly_percentile']:.1f}",
-            f"is_anomalous={bool(row['is_anomalous'])}",        
+            f"is_anomalous={bool(row['is_anomalous'])}",
         ]
 
         if "iforest_score" in row.index:
@@ -605,6 +675,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
             parts.append(f"ensemble_score={row['ensemble_score']:.3f}")
 
         print("- " + " ".join(parts))
+
 
 def cmd_report(args: argparse.Namespace) -> None:
     if args.log_type != "ssh_auth":
@@ -683,10 +754,17 @@ def cmd_report(args: argparse.Namespace) -> None:
                 f"    user={item['user']} incident_count={item['incident_count']}"
             )
 
+
+# ---- Main / parser setup ------------------------------------------------
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="aegislog",
-        description="Analyze logs, detect anomalous sessions, group SSH incidents, and generate incident explanations.",
+        description=(
+            "Analyze logs, detect anomalous sessions, group SSH incidents, "
+            "and generate incident explanations."
+        ),
         epilog=(
             "Examples:\n"
             "  aegislog analyze data/loghub/SSH.log --log-type ssh_auth --top 5\n"
@@ -697,10 +775,12 @@ def main(argv: list[str] | None = None) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
     p_examples = subparsers.add_parser(
         "examples", help="Show example log_path/log-type/model-path combinations."
     )
     p_examples.set_defaults(func=cmd_examples)
+
     p_init = subparsers.add_parser("init", help="Initialize experiment database.")
     p_init.set_defaults(func=cmd_init)
 
@@ -773,25 +853,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_analyze.set_defaults(func=cmd_analyze)
 
+    # incidents
     p_incidents = subparsers.add_parser(
         "incidents", help="Group anomalous sessions into simple IP-based incidents."
     )
-    p_incidents.add_argument("log_path", help="Path to log file.")
-    p_incidents.add_argument(
-        "--model-path",
-        default="models/log_anomaly_iforest_ssh.joblib",
-        help="Path to trained model.",
-    )
+    add_ssh_source_args(p_incidents)
+    add_json_output_args(p_incidents, "incidents")
     p_incidents.add_argument(
         "--show-local-explanation",
         action="store_true",
         help="Show a simple, built-in AI-style explanation for each incident.",
-    )
-    p_incidents.add_argument(
-        "--log-type",
-        choices=["ssh_auth"],
-        default="ssh_auth",
-        help="Type of log file to parse (currently ssh_auth only).",
     )
     p_incidents.add_argument(
         "--top",
@@ -803,22 +874,6 @@ def main(argv: list[str] | None = None) -> None:
         "--print-llm-prompt",
         action="store_true",
         help="For each incident, print a ready-to-send LLM explanation prompt.",
-    )
-    p_incidents.add_argument(
-        "--format",
-        choices=["text", "json"],
-        default="text",
-        help="Output format for incidents (default: text).",
-    )
-    p_incidents.add_argument(
-        "--output",
-        help="Optional path to write JSON output instead of stdout.",
-    )
-    p_incidents.add_argument(
-        "--model-type",
-        choices=["iforest", "ocsvm", "lof"],
-        default="iforest",
-        help="Anomaly model to use for scoring.",
     )
     p_incidents.add_argument(
         "--threshold-percentile",
@@ -836,56 +891,21 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Show a per-incident session timeline ordered by time.",
     )
-
-    p_incidents.add_argument(
-        "--min-severity",
-        choices=["low", "medium", "high"],
-        help="Only include incidents at or above this severity.",
-    )
-    p_incidents.add_argument(
-        "--min-confidence",
-        choices=["low", "medium", "high"],
-        help="Only include incidents at or above this confidence level.",
-    )
     p_incidents.add_argument(
         "--sort-by",
         choices=["severity", "avg_score", "auth_fail_ratio", "total_events"],
         default="severity",
         help="Sort incidents before applying --top (default: severity).",
     )
-    p_incidents.add_argument(
-        "--pattern",
-        dest="patterns",
-        choices=[
-            "brute_force",
-            "password_spray",
-            "possible_compromise",
-            "low_signal",
-            "suspicious_auth_activity",
-        ],
-        action="append",
-        help=(
-            "Filter incidents by attack pattern; can be specified multiple "
-            "times (e.g. --pattern brute_force --pattern password_spray)."
-        ),
-    )
+    add_incident_filter_args(p_incidents)
     p_incidents.set_defaults(func=cmd_incidents)
-    
+
+    # explain
     p_explain = subparsers.add_parser(
         "explain", help="Explain a single SSH incident with AI-style output."
     )
-    p_explain.add_argument("log_path", help="Path to log file.")
-    p_explain.add_argument(
-        "--model-path",
-        default="models/log_anomaly_iforest_ssh.joblib",
-        help="Path to trained model.",
-    )
-    p_explain.add_argument(
-        "--log-type",
-        choices=["ssh_auth"],
-        default="ssh_auth",
-        help="Type of log file to parse (currently ssh_auth only).",
-    )
+    add_ssh_source_args(p_explain)
+    add_json_output_args(p_explain, "the explanation")
     p_explain.add_argument(
         "--index",
         type=int,
@@ -901,22 +921,6 @@ def main(argv: list[str] | None = None) -> None:
         ),
     )
     p_explain.add_argument(
-        "--format",
-        choices=["text", "json"],
-        default="text",
-        help="Output format for the explanation (default: text).",
-    )
-    p_explain.add_argument(
-        "--output",
-        help="Optional path to write JSON output instead of stdout.",
-    )
-    p_explain.add_argument(
-        "--model-type",
-        choices=["iforest", "ocsvm", "lof"],
-        default="iforest",
-        help="Anomaly model to use for scoring.",
-    )
-    p_explain.add_argument(
         "--threshold-percentile",
         type=float,
         default=99.0,
@@ -926,60 +930,20 @@ def main(argv: list[str] | None = None) -> None:
         ),
     )
     p_explain.add_argument(
-        "--min-severity",
-        choices=["low", "medium", "high"],
-        help="Only consider incidents at or above this severity when selecting by index.",
-    )
-    p_explain.add_argument(
-        "--min-confidence",
-        choices=["low", "medium", "high"],
-        help="Only consider incidents at or above this confidence when selecting by index.",
-    )
-    p_explain.add_argument(
         "--first",
         action="store_true",
         help="Explain the first incident after applying any severity/confidence/pattern filters.",
     )
-    p_explain.add_argument(
-        "--pattern",
-        dest="patterns",
-        choices=[
-            "brute_force",
-            "password_spray",
-            "possible_compromise",
-            "low_signal",
-            "suspicious_auth_activity",
-        ],
-        action="append",
-        help=(
-            "Only consider incidents whose attack_pattern matches one of the "
-            "given values; can be specified multiple times."
-        ),
-    )
+    add_incident_filter_args(p_explain)
     p_explain.set_defaults(func=cmd_explain)
 
+    # report
     p_report = subparsers.add_parser(
         "report",
         help="Summarize anomalous sessions and grouped incidents with aggregate metrics.",
     )
-    p_report.add_argument("log_path", help="Path to log file.")
-    p_report.add_argument(
-        "--log-type",
-        choices=["ssh_auth"],
-        default="ssh_auth",
-        help="Type of log file to parse (currently ssh_auth only).",
-    )
-    p_report.add_argument(
-        "--model-path",
-        default=None,
-        help="Path to trained model (defaults depend on log-type/profile).",
-    )
-    p_report.add_argument(
-        "--model-type",
-        choices=["iforest", "ocsvm", "lof"],
-        default="iforest",
-        help="Anomaly model to use for scoring.",
-    )
+    add_ssh_source_args(p_report)
+    add_json_output_args(p_report, "the report")
     p_report.add_argument(
         "--multi-score",
         action="store_true",
@@ -997,43 +961,9 @@ def main(argv: list[str] | None = None) -> None:
         default=5,
         help="Number of top IPs/users to include in the report.",
     )
-    p_report.add_argument(
-        "--format",
-        choices=["text", "json"],
-        default="text",
-        help="Output format for the report (default: text).",
-    )
-    p_report.add_argument(
-        "--output",
-        help="Optional path to write JSON output instead of stdout.",
-    )
-    p_report.add_argument(
-        "--min-severity",
-        choices=["low", "medium", "high"],
-        help="Only include incidents at or above this severity in the report.",
-    )
-    p_report.add_argument(
-        "--min-confidence",
-        choices=["low", "medium", "high"],
-        help="Only include incidents at or above this confidence level in the report.",
-    )
-    p_report.add_argument(
-        "--pattern",
-        dest="patterns",
-        choices=[
-            "brute_force",
-            "password_spray",
-            "possible_compromise",
-            "low_signal",
-            "suspicious_auth_activity",
-        ],
-        action="append",
-        help=(
-            "Only include incidents whose attack_pattern matches one of the "
-            "given values in the report; can be specified multiple times."
-        ),
-    )
+    add_incident_filter_args(p_report)
     p_report.set_defaults(func=cmd_report)
+
     args = parser.parse_args(argv)
     args.func(args)
 
