@@ -1138,3 +1138,29 @@ Progress log: 04/25/2026
 - After resolving the import and JSON output issues:  
   - Integration tests, including `test_cli_report_integration.py`, now pass.  
   - The CLI refactor is behaviorally compatible, but structurally cleaner and easier to extend (e.g., for future Apache incident support).
+
+
+Progress log: 04/26/2026
+
+Refactored cli.py so parser construction now lives in build_parser(), which separates CLI assembly from parse-and-dispatch flow and makes the entrypoint cleaner to test.
+
+Extracted the analyze subparser registration into aegislog/cli_analyze.py, continuing the modular CLI structure already started for SSH subcommands.
+
+Moved cmd_analyze into cli_analyze.py so the analyze command now owns both its parser wiring and command implementation in one module.
+
+Kept cli.py as a thinner orchestration layer that mainly registers commands and dispatches execution.
+
+Fixed the pytest collection/import regression by restoring write_output and session_row_to_dict as imports in aegislog.cli, preserving the public import surface expected by tests/test_cli_json.py.
+
+Re-ran tests successfully after the compatibility fix, so the refactor is in a passing state.
+
+Tomorrow todo
+Extract train into a dedicated cli_train.py module with a register_train_parser(subparsers) helper and cmd_train, so cli.py continues shrinking consistently.
+
+Consider doing the same for the remaining lightweight commands, especially examples and init, if you want a fully uniform module-per-command structure.
+
+Decide whether cli.py should remain a compatibility surface for helper imports like write_output and session_row_to_dict, or whether tests should eventually import those directly from cli_common.
+
+Add or update CLI-focused tests around build_parser() so parser existence, subcommand registration, and dispatch assumptions are covered explicitly.
+
+If energy is lower tomorrow, make the first task just the cli_train.py extraction, since that is the cleanest next incremental refactor and keeps momentum without opening too many fronts.
