@@ -30,6 +30,14 @@ from aegislog.ai_client import call_llm_for_incident, LLMConfigError
 SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3}
 CONFIDENCE_ORDER = {"low": 1, "medium": 2, "high": 3}
 
+SSH_ATTACK_PATTERN_CHOICES = [
+    "brute_force",
+    "password_spray",
+    "possible_compromise",
+    "low_signal",
+    "suspicious_auth_activity",
+]
+
 
 def filter_incidents_by_patterns(
     incidents,
@@ -331,13 +339,7 @@ def add_incident_filter_args(
     pattern_choices: list[str] | None = None,
 ) -> None:
     if pattern_choices is None:
-        pattern_choices = [
-            "brute_force",
-            "password_spray",
-            "possible_compromise",
-            "low_signal",
-            "suspicious_auth_activity",
-        ]
+        pattern_choices = SSH_ATTACK_PATTERN_CHOICES
 
     parser.add_argument(
         "--min-severity",
