@@ -320,32 +320,41 @@ def add_json_output_args(parser: argparse.ArgumentParser, noun: str) -> None:
     )
 
 
-def add_incident_filter_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--min-severity",
-        choices=["low", "medium", "high"],
-        help="Only include incidents at or above this severity.",
-    )
-    parser.add_argument(
-        "--min-confidence",
-        choices=["low", "medium", "high"],
-        help="Only include incidents at or above this confidence level.",
-    )
-    parser.add_argument(
-        "--pattern",
-        dest="patterns",
-        choices=[
+def add_incident_filter_args(
+    parser: argparse.ArgumentParser,
+    *,
+    severity_help: str = "Only include incidents at or above this severity.",
+    confidence_help: str = "Only include incidents at or above this confidence level.",
+    pattern_help: str = (
+        "Filter incidents by attack pattern; can be specified multiple times."
+    ),
+    pattern_choices: list[str] | None = None,
+) -> None:
+    if pattern_choices is None:
+        pattern_choices = [
             "brute_force",
             "password_spray",
             "possible_compromise",
             "low_signal",
             "suspicious_auth_activity",
-        ],
+        ]
+
+    parser.add_argument(
+        "--min-severity",
+        choices=["low", "medium", "high"],
+        help=severity_help,
+    )
+    parser.add_argument(
+        "--min-confidence",
+        choices=["low", "medium", "high"],
+        help=confidence_help,
+    )
+    parser.add_argument(
+        "--pattern",
+        dest="patterns",
+        choices=pattern_choices,
         action="append",
-        help=(
-            "Filter incidents by attack pattern; can be specified multiple "
-            "times."
-        ),
+        help=pattern_help,
     )
 
 
@@ -897,7 +906,15 @@ def main(argv: list[str] | None = None) -> None:
         default="severity",
         help="Sort incidents before applying --top (default: severity).",
     )
-    add_incident_filter_args(p_incidents)
+    add_incident_filter_args(
+        p_incidents,
+        severity_help="Only include incidents at or above this severity.",
+        confidence_help="Only include incidents at or above this confidence level.",
+        pattern_help=(
+            "Filter incidents by attack pattern; can be specified multiple "
+            "times (e.g. --pattern brute_force --pattern password_spray)."
+        ),
+    )
     p_incidents.set_defaults(func=cmd_incidents)
 
     # explain
@@ -934,7 +951,21 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Explain the first incident after applying any severity/confidence/pattern filters.",
     )
-    add_incident_filter_args(p_explain)
+    add_incident_filter_args(
+        p_explain,
+        severity_help=(
+            "Only consider incidents at or above this severity when "
+            "selecting by index."
+        ),
+        confidence_help=(
+            "Only consider incidents at or above this confidence when "
+            "selecting by index."
+        ),
+        pattern_help=(
+            "Only consider incidents whose attack_pattern matches one of the "
+            "given values; can be specified multiple times."
+        ),
+    )
     p_explain.set_defaults(func=cmd_explain)
 
     # report
@@ -961,7 +992,17 @@ def main(argv: list[str] | None = None) -> None:
         default=5,
         help="Number of top IPs/users to include in the report.",
     )
-    add_incident_filter_args(p_report)
+    add_incident_filter_args(
+        p_report,
+        severity_help="Only include incidents at or above this severity in the report.",
+        confidence_help=(
+            "Only include incidents at or above this confidence level in the report."
+        ),
+        pattern_help=(
+            "Only include incidents whose attack_pattern matches one of the "
+            "given values in the report; can be specified multiple times."
+        ),
+    )
     p_report.set_defaults(func=cmd_report)
 
     args = parser.parse_args(argv)
