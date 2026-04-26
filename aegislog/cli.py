@@ -371,7 +371,11 @@ def cmd_explain(args: argparse.Namespace) -> None:
         print("Currently, explain is only implemented for ssh_auth logs.")
         return
 
-    sessions, df, incidents = load_ssh_incidents_for_cli(args)
+    sessions, df, incidents = load_ssh_incidents_for_cli(
+        args,
+        anomalous_only=getattr(args, "alerts_only", False),
+        restrict_sessions_to_df=True,
+    )
 
     if df.empty:
         print("No sessions found.")
@@ -699,8 +703,8 @@ def cmd_report(args: argparse.Namespace) -> None:
     # Load and score sessions, then group into incidents using the shared helper.
     sessions, df, incidents = load_ssh_incidents_for_cli(
         args,
-        anomalous_only=True,          # report is about anomalous sessions only
-        restrict_sessions_to_df=True, # keep sessions aligned with df
+        anomalous_only=getattr(args, "alerts_only", False),
+        restrict_sessions_to_df=True,
     )
 
     total_sessions = len(sessions)
@@ -996,6 +1000,11 @@ def main(argv: list[str] | None = None) -> None:
         type=int,
         default=5,
         help="Number of top IPs/users to include in the report.",
+    )
+    p_report.add_argument(
+        "--alerts-only",
+        action="store_true",
+        help="Build the report from only threshold-flagged anomalous sessions.",
     )
     add_incident_filter_args(
         p_report,
