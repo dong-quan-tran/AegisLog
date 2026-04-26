@@ -34,6 +34,7 @@ __all__ = [
     "write_output",
     "session_row_to_dict",
     "incident_to_dict",
+    "build_parser",
     "cmd_analyze",
     "cmd_incidents",
     "cmd_explain",
@@ -131,7 +132,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
         print("- " + " ".join(parts))
 
 
-def main(argv: list[str] | None = None) -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="aegislog",
         description=(
@@ -170,9 +171,19 @@ def main(argv: list[str] | None = None) -> None:
     subparsers.choices["analyze"].set_defaults(func=cmd_analyze)
 
     register_incidents_parser(subparsers)
-    register_explain_parser(subparsers)
-    register_report_parser(subparsers)
+    subparsers.choices["incidents"].set_defaults(func=cmd_incidents)
 
+    register_explain_parser(subparsers)
+    subparsers.choices["explain"].set_defaults(func=cmd_explain)
+
+    register_report_parser(subparsers)
+    subparsers.choices["report"].set_defaults(func=cmd_report)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
     args = parser.parse_args(argv)
     args.func(args)
 
