@@ -20,12 +20,13 @@ from aegislog.cli_common import (
 )
 
 from aegislog.cli_ssh import (
-    add_ssh_source_args,
-    add_incident_filter_args,
     incident_to_dict,
     cmd_incidents,
     cmd_explain,
     cmd_report,
+    register_incidents_parser,
+    register_explain_parser,
+    register_report_parser,
 )
 
 __all__ = [
@@ -38,6 +39,7 @@ __all__ = [
     "cmd_report",
     "main",
 ]
+
 
 def cmd_examples(args: argparse.Namespace) -> None:
     print("Example commands:")
@@ -214,155 +216,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_analyze.set_defaults(func=cmd_analyze)
 
-    p_incidents = subparsers.add_parser(
-        "incidents", help="Group anomalous sessions into simple IP-based incidents."
-    )
-    add_ssh_source_args(p_incidents)
-    add_json_output_args(p_incidents, "incidents")
-    p_incidents.add_argument(
-        "--show-local-explanation",
-        action="store_true",
-        help="Show a simple, built-in AI-style explanation for each incident.",
-    )
-    p_incidents.add_argument(
-        "--top",
-        type=int,
-        default=5,
-        help="Number of top incidents to print.",
-    )
-    p_incidents.add_argument(
-        "--print-llm-prompt",
-        action="store_true",
-        help="For each incident, print a ready-to-send LLM explanation prompt.",
-    )
-    p_incidents.add_argument(
-        "--threshold-percentile",
-        type=float,
-        default=99.0,
-        help="Percentile threshold for flagging anomalous sessions before grouping incidents (default: 99.0).",
-    )
-    p_incidents.add_argument(
-        "--alerts-only",
-        action="store_true",
-        help="Group incidents from only threshold-flagged anomalous sessions.",
-    )
-    p_incidents.add_argument(
-        "--show-timeline",
-        action="store_true",
-        help="Show a per-incident session timeline ordered by time.",
-    )
-    p_incidents.add_argument(
-        "--sort-by",
-        choices=["severity", "avg_score", "auth_fail_ratio", "total_events"],
-        default="severity",
-        help="Sort incidents before applying --top (default: severity).",
-    )
-    add_incident_filter_args(
-        p_incidents,
-        severity_help="Only include incidents at or above this severity.",
-        confidence_help="Only include incidents at or above this confidence level.",
-        pattern_help=(
-            "Filter incidents by attack pattern; can be specified multiple "
-            "times (e.g. --pattern brute_force --pattern password_spray)."
-        ),
-    )
-    p_incidents.set_defaults(func=cmd_incidents)
-
-    p_explain = subparsers.add_parser(
-        "explain", help="Explain a single SSH incident with AI-style output."
-    )
-    add_ssh_source_args(p_explain)
-    add_json_output_args(p_explain, "the explanation")
-    p_explain.add_argument(
-        "--index",
-        type=int,
-        default=0,
-        help="Zero-based index into the sorted list of incidents to explain.",
-    )
-    p_explain.add_argument(
-        "--use-llm",
-        action="store_true",
-        help=(
-            "If set, call a real LLM to generate an incident explanation "
-            "(requires OPENAI_API_KEY)."
-        ),
-    )
-    p_explain.add_argument(
-        "--threshold-percentile",
-        type=float,
-        default=99.0,
-        help=(
-            "Percentile threshold for flagging anomalous sessions before "
-            "grouping incidents for explanation (default: 99.0)."
-        ),
-    )
-    p_explain.add_argument(
-        "--alerts-only",
-        action="store_true",
-        help="Only explain incidents built from threshold-flagged anomalous sessions.",
-    )
-    p_explain.add_argument(
-        "--first",
-        action="store_true",
-        help="Explain the first incident after applying any severity/confidence/pattern filters.",
-    )
-    add_incident_filter_args(
-        p_explain,
-        severity_help=(
-            "Only consider incidents at or above this severity when "
-            "selecting by index."
-        ),
-        confidence_help=(
-            "Only consider incidents at or above this confidence when "
-            "selecting by index."
-        ),
-        pattern_help=(
-            "Only consider incidents whose attack_pattern matches one of the "
-            "given values; can be specified multiple times."
-        ),
-    )
-    p_explain.set_defaults(func=cmd_explain)
-
-    p_report = subparsers.add_parser(
-        "report",
-        help="Summarize anomalous sessions and grouped incidents with aggregate metrics.",
-    )
-    add_ssh_source_args(p_report)
-    add_json_output_args(p_report, "the report")
-    p_report.add_argument(
-        "--multi-score",
-        action="store_true",
-        help="Score sessions with all available models and include normalized/ensemble scores.",
-    )
-    p_report.add_argument(
-        "--threshold-percentile",
-        type=float,
-        default=99.0,
-        help="Percentile threshold for flagging anomalous sessions before reporting (default: 99.0).",
-    )
-    p_report.add_argument(
-        "--top",
-        type=int,
-        default=5,
-        help="Number of top IPs/users to include in the report.",
-    )
-    p_report.add_argument(
-        "--alerts-only",
-        action="store_true",
-        help="Build the report from only threshold-flagged anomalous sessions.",
-    )
-    add_incident_filter_args(
-        p_report,
-        severity_help="Only include incidents at or above this severity in the report.",
-        confidence_help=(
-            "Only include incidents at or above this confidence level in the report."
-        ),
-        pattern_help=(
-            "Only include incidents whose attack_pattern matches one of the "
-            "given values in the report; can be specified multiple times."
-        ),
-    )
-    p_report.set_defaults(func=cmd_report)
+    register_incidents_parser(subparsers)
+    register_explain_parser(subparsers)
+    register_report_parser(subparsers)
 
     args = parser.parse_args(argv)
     args.func(args)
