@@ -27,6 +27,9 @@ from aegislog.incidents import (
 from aegislog.ai_client import call_llm_for_incident, LLMConfigError
 
 
+SEVERITY_CHOICES = ["low", "medium", "high"]
+CONFIDENCE_CHOICES = ["low", "medium", "high"]
+
 SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3}
 CONFIDENCE_ORDER = {"low": 1, "medium": 2, "high": 3}
 
@@ -343,12 +346,12 @@ def add_incident_filter_args(
 
     parser.add_argument(
         "--min-severity",
-        choices=["low", "medium", "high"],
+        choices=SEVERITY_CHOICES,
         help=severity_help,
     )
     parser.add_argument(
         "--min-confidence",
-        choices=["low", "medium", "high"],
+        choices=CONFIDENCE_CHOICES,
         help=confidence_help,
     )
     parser.add_argument(
