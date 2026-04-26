@@ -1043,3 +1043,98 @@ Use python -m aegislog.ml.train ... from the repo root with actual log paths und
   - `aegislog.incidents` (grouping + pattern classification).
   - CLI commands (conditional support for `--log-type apache_error` in `incidents` and `report` once behavior is implemented).  
 
+
+Progress log: 04/25/2026
+
+
+## CLI behavior and options
+
+- Aligned **alerts-only behavior** across commands:  
+  - `incidents`, `report`, and `explain` now all accept `--alerts-only`, which controls whether incidents are built only from threshold-flagged anomalous sessions.  
+  - `analyze` already used `--alerts-only` to filter sessions; now the semantics are consistent across SSH incident commands.
+
+- Strengthened **JSON output contract** for `report`:  
+  - When `--format json --output ...` is used and severity/confidence/pattern filters match no incidents, the CLI now writes a valid, empty incident report JSON instead of creating no file.  
+  - Text mode still prints a clear message: “No incidents matched the specified severity/confidence/pattern filters.”  
+
+- Ensured **backwards compatibility** for tests and public API:  
+  - Re-exported `incident_to_dict` from the main CLI module so existing imports like `from aegislog.cli import incident_to_dict` continue to work.  
+  - This avoided test breakage after the module split without changing behavior.
+
+## Shared helpers and constants
+
+- Introduced **shared choice constants** for severity and confidence:  
+  - Added `SEVERITY_CHOICES` and `CONFIDENCE_CHOICES` to back argparse `choices` and keep them in sync with `SEVERITY_ORDER` and `CONFIDENCE_ORDER`.  
+  - Removed duplicated `"low", "medium", "high"` literals from parser setup.
+
+- Centralized **common helpers** in a new module:  
+  - Created `cli_common` with:
+    - `SEVERITY_CHOICES`, `CONFIDENCE_CHOICES`, `SEVERITY_ORDER`, `CONFIDENCE_ORDER`.  
+    - `write_output` for consistent file/stdout handling.  
+    - `session_row_to_dict` for JSON session rows.  
+    - `resolve_model_path` and `resolve_multi_model_paths` for model selection.  
+    - `add_json_output_args` to DRY up `--format` / `--output` parsing.
+
+## SSH-specific split: `cli_ssh`
+
+- Created **`cli_ssh` module** to hold SSH-incident logic:  
+  - Constants and filters:
+    - `SSH_ATTACK_PATTERN_CHOICES`.  
+    - `filter_incidents_by_patterns`.  
+    - `sort_incidents`.  
+    - `filter_incidents_by_thresholds`.  
+  - Serialization helpers:
+    - `incident_to_dict`.  
+    - `timeline_entry_to_dict`.  
+  - Shared loader:
+    - `load_ssh_incidents_for_cli(args, anomalous_only, restrict_sessions_to_df)` that:
+      - Parses SSH auth logs.  
+      - Builds sessions and scores them.  
+      - Adds threshold columns.  
+      - Optionally filters to anomalous sessions.  
+      - Restricts sessions to those in the filtered DataFrame.  
+      - Groups sessions into incidents.
+
+- Moved **SSH-only parser helpers** into `cli_ssh`:  
+  - `add_ssh_source_args` (log path, log-type `ssh_auth`, model path, model type).  
+  - `add_incident_filter_args` (severity, confidence, pattern filters using the shared choice constants).
+
+- Migrated **SSH commands** into `cli_ssh`:  
+  - `cmd_incidents` now:
+    - Uses `load_ssh_incidents_for_cli` with `anomalous_only` wired to `--alerts-only`.  
+    - Applies severity, confidence, and pattern filters.  
+    - Supports `--sort-by`, `--show_timeline`, `--show_local_explanation`, `--print_llm_prompt`.  
+    - Respects `--format json` and `--output`.  
+  - `cmd_explain` now:
+    - Uses the shared loader with `anomalous_only` wired to `--alerts-only`.  
+    - Applies the same filters and supports `--first` and `--index`.  
+    - Outputs local explanation, and optionally calls the LLM or prints the LLM prompt.  
+    - Supports `--format json` and `--output`.  
+  - `cmd_report` now:
+    - Uses `load_ssh_incidents_for_cli` with `anomalous_only` wired to `--alerts-only`.  
+    - Computes totals and anomalous session counts.  
+    - Applies severity, confidence, and pattern filters.  
+    - In JSON mode always writes a report, even when filters match nothing.
+
+## Slimmed-down `cli` entrypoint
+
+- `cli.py` now focuses on:  
+  - Top-level imports and shared wiring.  
+  - Simple commands: `cmd_examples`, `cmd_init`, `cmd_train`.  
+  - Cross-dataset `cmd_analyze` (Apache + SSH) using shared helpers from `cli_common`.  
+  - Parser construction:
+    - Uses `add_json_output_args` from `cli_common`.  
+    - Uses `add_ssh_source_args` and `add_incident_filter_args` from `cli_ssh`.  
+    - Wires subparsers to `cmd_incidents`, `cmd_explain`, `cmd_report`, and `cmd_analyze`.  
+
+- Maintained **CLI surface compatibility**:  
+  - Command names and most flags stayed the same.  
+  - New/updated flags:
+    - `--alerts-only` added to `report` and `explain`.  
+    - Shared severity/confidence choices via constants.  
+
+## Testing and outcomes
+
+- After resolving the import and JSON output issues:  
+  - Integration tests, including `test_cli_report_integration.py`, now pass.  
+  - The CLI refactor is behaviorally compatible, but structurally cleaner and easier to extend (e.g., for future Apache incident support).
