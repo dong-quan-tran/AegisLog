@@ -4,6 +4,42 @@ from collections import Counter
 from .sessions import Session
 
 
+def _compute_auth_failed_streak_max(statuses: list[int]) -> int:
+    streak = 0
+    max_streak = 0
+    for s in statuses:
+        if s == 401:
+            streak += 1
+            if streak > max_streak:
+                max_streak = streak
+        else:
+            streak = 0
+    return max_streak
+
+
+def _compute_burst_max_per_minute(timestamps) -> int:
+    # timestamps is expected to be a sequence/Index of pandas Timestamps
+    if timestamps is None or len(timestamps) == 0:
+        return 0
+    left = 0
+    max_count = 1
+    for right in range(len(timestamps)):
+        while timestamps[right] - timestamps[left] > pd.Timedelta(seconds=60):
+            left += 1
+        window_size = right - left + 1
+        if window_size > max_count:
+            max_count = window_size
+    return max_count
+
+
+def _compute_rare_hour_flag(timestamps) -> int:
+    if timestamps is None or len(timestamps) == 0:
+        return 0
+    hours = [ts.hour for ts in timestamps]
+    rare_count = sum(1 for h in hours if 0 <= h < 4)
+    return 1 if rare_count > len(hours) / 2 else 0
+
+
 def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
     rows = []
     for s in sessions:
@@ -33,6 +69,17 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
         source_count = len(s.source_set)
         has_mixed_sources = 1 if len(s.source_set) > 1 else 0
 
+        # --- NEW SSH-focused features ---
+        timestamps = [e.timestamp for e in events]
+        auth_failed_streak_max = _compute_auth_failed_streak_max(statuses)
+        auth_burst_max_per_minute = _compute_burst_max_per_minute(
+            pd.to_datetime(timestamps)
+        )
+        ssh_distinct_users = len({ev.user for ev in events if ev.user})
+        ssh_distinct_ips_per_user = len({(ev.user, ev.ip) for ev in events if ev.user and ev.ip})
+        ssh_rare_hour = _compute_rare_hour_flag(pd.to_datetime(timestamps))
+        # --------------------------------
+
         rows.append(
             {
                 "session_id": s.session_id,
@@ -53,6 +100,12 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
                 "unique_paths": unique_paths,
                 "source_count": source_count,
                 "has_mixed_sources": has_mixed_sources,
+                # NEW feature columns
+                "auth_failed_streak_max": auth_failed_streak_max,
+                "auth_burst_max_per_minute": auth_burst_max_per_minute,
+                "ssh_distinct_users": ssh_distinct_users,
+                "ssh_distinct_ips_per_user": ssh_distinct_ips_per_user,
+                "ssh_rare_hour": ssh_rare_hour,
             }
         )
     return pd.DataFrame(rows)

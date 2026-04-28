@@ -33,6 +33,12 @@ NUMERIC_FEATURES = [
     "unique_paths",
     "source_count",
     "has_mixed_sources",
+    # NEW SSH-focused numeric features
+    "auth_failed_streak_max",
+    "auth_burst_max_per_minute",
+    "ssh_distinct_users",
+    "ssh_distinct_ips_per_user",
+    "ssh_rare_hour",
 ]
 
 def build_ocsvm_pipeline(
