@@ -33,7 +33,9 @@ class Incident:
     targeted_users: List[str]
     first_seen: Optional[datetime]
     last_seen: Optional[datetime]
-
+    # NEW SSH-focused aggregates
+    auth_failed_streak_max: int = 0
+    auth_burst_max_per_minute: int = 0
 
 @dataclass
 class IncidentTimelineEntry:
@@ -134,6 +136,9 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
         f"{compromise_hint}"
         f"{time_phrase}"
     )
+    
+    intensity_hint = _describe_auth_intensity(incident)
+    description += intensity_hint
 
     actions = recommend_incident_actions(incident)
     if actions:
@@ -399,6 +404,8 @@ def group_sessions_to_incidents(
                 "anomaly_score": row["anomaly_score"],
                 "auth_failed": row.get("auth_failed", 0),
                 "auth_success": row.get("auth_success", 0),
+                "auth_failed_streak_max": row.get("auth_failed_streak_max", 0),
+                "auth_burst_max_per_minute": row.get("auth_burst_max_per_minute", 0),
                 "start_time": sess.start_time,
                 "end_time": sess.end_time,
             }
@@ -437,6 +444,15 @@ def group_sessions_to_incidents(
             total_success = sum(s["auth_success"] for s in cluster)
             auth_total = total_failed + total_success
             auth_fail_ratio = total_failed / auth_total if auth_total else 0.0
+
+            auth_failed_streak_max = max(
+                (s.get("auth_failed_streak_max", 0) for s in cluster),
+                default=0,
+            )
+            auth_burst_max_per_minute = max(
+                (s.get("auth_burst_max_per_minute", 0) for s in cluster),
+                default=0,
+            )
 
             users = [
                 s["user"]
@@ -524,6 +540,8 @@ def group_sessions_to_incidents(
                     last_seen=last_seen,
                     primary_user=primary_user,
                     targeted_users=targeted_users,
+                    auth_failed_streak_max=auth_failed_streak_max,
+                    auth_burst_max_per_minute=auth_burst_max_per_minute,
                 )
             )
 
@@ -538,6 +556,21 @@ def group_sessions_to_incidents(
     ) 
     return incidents
 
+def _describe_auth_intensity(incident: Incident) -> str:
+    parts: List[str] = []
+    if incident.auth_failed_streak_max >= 50:
+        parts.append(
+            f"maximum consecutive failed attempts reached {incident.auth_failed_streak_max}, "
+            "indicating sustained guessing against one or a small set of credentials"
+        )
+    if incident.auth_burst_max_per_minute >= 1000:
+        parts.append(
+            f"peak SSH activity reached {incident.auth_burst_max_per_minute} events per minute, "
+            "which is consistent with automated attack tooling"
+        )
+    if not parts:
+        return ""
+    return " Authentication intensity: " + " ".join(parts) + "."
 
 def build_incident_report(
     incidents: List[Incident],
