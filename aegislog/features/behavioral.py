@@ -17,6 +17,21 @@ def _compute_auth_failed_streak_max(statuses: list[int]) -> int:
     return max_streak
 
 
+def _compute_success_after_failure_count(statuses: list[int]) -> int:
+    """
+    Count how many successful auths (200) occur after at least
+    one failed auth (401) in the session.
+    """
+    saw_failure = False
+    count = 0
+    for s in statuses:
+        if s == 401:
+            saw_failure = True
+        elif s == 200 and saw_failure:
+            count += 1
+    return count
+
+
 def _compute_burst_max_per_minute(timestamps) -> int:
     # timestamps is expected to be a sequence/Index of pandas Timestamps
     if timestamps is None or len(timestamps) == 0:
@@ -32,6 +47,24 @@ def _compute_burst_max_per_minute(timestamps) -> int:
     return max_count
 
 
+def _compute_inter_event_gaps_seconds(timestamps) -> tuple[float, float]:
+    """
+    Return (mean_gap_seconds, max_gap_seconds) for consecutive events
+    within a session. If fewer than 2 events, both are 0.0.
+    """
+    if timestamps is None or len(timestamps) < 2:
+        return 0.0, 0.0
+    diffs = [
+        (timestamps[i] - timestamps[i - 1]).total_seconds()
+        for i in range(1, len(timestamps))
+    ]
+    if not diffs:
+        return 0.0, 0.0
+    mean_gap = float(sum(diffs) / len(diffs))
+    max_gap = float(max(diffs))
+    return mean_gap, max_gap
+
+
 def _compute_rare_hour_flag(timestamps) -> int:
     if timestamps is None or len(timestamps) == 0:
         return 0
@@ -42,6 +75,19 @@ def _compute_rare_hour_flag(timestamps) -> int:
 
 def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
     rows = []
+    # Pre-compute simple "first seen in this batch" indices for IP and user
+    # based on session start_time.
+    ip_first_seen: dict[str, float] = {}
+    user_first_seen: dict[str, float] = {}
+
+    for s in sessions:
+        if s.ip:
+            ts = s.start_time.timestamp()
+            ip_first_seen[s.ip] = min(ip_first_seen.get(s.ip, ts), ts)
+        if s.user:
+            ts = s.start_time.timestamp()
+            user_first_seen[s.user] = min(user_first_seen.get(s.user, ts), ts)
+
     for s in sessions:
         events = s.events
         if not events:
@@ -69,15 +115,35 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
         source_count = len(s.source_set)
         has_mixed_sources = 1 if len(s.source_set) > 1 else 0
 
-        # --- NEW SSH-focused features ---
+        # --- SSH-focused features ---
         timestamps = [e.timestamp for e in events]
+        pd_ts = pd.to_datetime(timestamps)
+
         auth_failed_streak_max = _compute_auth_failed_streak_max(statuses)
-        auth_burst_max_per_minute = _compute_burst_max_per_minute(
-            pd.to_datetime(timestamps)
-        )
+        success_after_failure_count = _compute_success_after_failure_count(statuses)
+        auth_burst_max_per_minute = _compute_burst_max_per_minute(pd_ts)
+        mean_gap_seconds, max_gap_seconds = _compute_inter_event_gaps_seconds(timestamps)
+
         ssh_distinct_users = len({ev.user for ev in events if ev.user})
-        ssh_distinct_ips_per_user = len({(ev.user, ev.ip) for ev in events if ev.user and ev.ip})
-        ssh_rare_hour = _compute_rare_hour_flag(pd.to_datetime(timestamps))
+        ssh_distinct_ips_per_user = len(
+            {(ev.user, ev.ip) for ev in events if ev.user and ev.ip}
+        )
+        # Explicit alias for clarity with your checklist wording
+        ssh_distinct_targeted_users = ssh_distinct_users
+
+        ssh_rare_hour = _compute_rare_hour_flag(pd_ts)
+
+        # First-seen flags within this batch (earliest session start_time for IP/user)
+        first_seen_ip_flag = 0
+        first_seen_user_flag = 0
+        if s.ip:
+            first_seen_ip_flag = (
+                1 if s.start_time.timestamp() == ip_first_seen.get(s.ip) else 0
+            )
+        if s.user:
+            first_seen_user_flag = (
+                1 if s.start_time.timestamp() == user_first_seen.get(s.user) else 0
+            )
         # --------------------------------
 
         rows.append(
@@ -100,12 +166,18 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
                 "unique_paths": unique_paths,
                 "source_count": source_count,
                 "has_mixed_sources": has_mixed_sources,
-                # NEW feature columns
+                # SSH feature columns
                 "auth_failed_streak_max": auth_failed_streak_max,
+                "success_after_failure_count": success_after_failure_count,
                 "auth_burst_max_per_minute": auth_burst_max_per_minute,
+                "mean_inter_event_gap_seconds": mean_gap_seconds,
+                "max_inter_event_gap_seconds": max_gap_seconds,
                 "ssh_distinct_users": ssh_distinct_users,
                 "ssh_distinct_ips_per_user": ssh_distinct_ips_per_user,
+                "ssh_distinct_targeted_users": ssh_distinct_targeted_users,
                 "ssh_rare_hour": ssh_rare_hour,
+                "first_seen_ip_flag": first_seen_ip_flag,
+                "first_seen_user_flag": first_seen_user_flag,
             }
         )
     return pd.DataFrame(rows)
