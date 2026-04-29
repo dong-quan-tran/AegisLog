@@ -262,3 +262,71 @@ def test_group_sessions_to_incidents_ip_centric_spray():
     assert inc.attack_pattern == "password_spray"
     assert set(inc.targeted_users) == {"user1", "user2", "user3", "user4", "user5"}
     assert inc.primary_user in inc.targeted_users
+
+
+from aegislog.incidents import (
+    _compute_severity,
+    _severity_reason,
+    _compute_confidence,
+    _confidence_reason,
+)
+
+
+def test_extreme_ssh_bruteforce_gets_high_severity_and_confidence():
+    """
+    Very large failed-auth volume with intense automation indicators
+    should be classified as high severity and high confidence.
+    """
+    avg_anomaly_score = 0.3
+    auth_failed = 5000
+    auth_fail_ratio = 0.99
+    session_count = 3
+    has_success_after_failures = False
+    auth_failed_streak_max = 2000
+    auth_burst_max_per_minute = 800
+
+    severity = _compute_severity(
+        avg_anomaly_score=avg_anomaly_score,
+        auth_failed=auth_failed,
+        auth_fail_ratio=auth_fail_ratio,
+        has_success_after_failures=has_success_after_failures,
+        auth_failed_streak_max=auth_failed_streak_max,
+        auth_burst_max_per_minute=auth_burst_max_per_minute,
+    )
+    severity_reason = _severity_reason(
+        avg_anomaly_score=avg_anomaly_score,
+        auth_failed=auth_failed,
+        auth_fail_ratio=auth_fail_ratio,
+        has_success_after_failures=has_success_after_failures,
+        auth_failed_streak_max=auth_failed_streak_max,
+        auth_burst_max_per_minute=auth_burst_max_per_minute,
+    )
+
+    confidence = _compute_confidence(
+        avg_anomaly_score=avg_anomaly_score,
+        auth_failed=auth_failed,
+        auth_fail_ratio=auth_fail_ratio,
+        session_count=session_count,
+        has_success_after_failures=has_success_after_failures,
+        auth_failed_streak_max=auth_failed_streak_max,
+        auth_burst_max_per_minute=auth_burst_max_per_minute,
+    )
+    confidence_reason = _confidence_reason(
+        avg_anomaly_score=avg_anomaly_score,
+        auth_failed=auth_failed,
+        auth_fail_ratio=auth_fail_ratio,
+        session_count=session_count,
+        has_success_after_failures=has_success_after_failures,
+        auth_failed_streak_max=auth_failed_streak_max,
+        auth_burst_max_per_minute=auth_burst_max_per_minute,
+    )
+
+    assert severity == "high"
+    assert "extremely high failed-auth volume" in severity_reason
+
+    assert confidence == "high"
+    # allow either streak-based or burst-based justification
+    assert (
+        "very long consecutive failed-auth streak" in confidence_reason
+        or "very high SSH event rate" in confidence_reason
+    )
