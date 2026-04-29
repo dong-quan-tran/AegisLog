@@ -33,9 +33,10 @@ class Incident:
     targeted_users: List[str]
     first_seen: Optional[datetime]
     last_seen: Optional[datetime]
-    # NEW SSH-focused aggregates
+    # SSH-focused aggregates
     auth_failed_streak_max: int = 0
     auth_burst_max_per_minute: int = 0
+
 
 @dataclass
 class IncidentTimelineEntry:
@@ -136,7 +137,7 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
         f"{compromise_hint}"
         f"{time_phrase}"
     )
-    
+
     intensity_hint = _describe_auth_intensity(incident)
     description += intensity_hint
 
@@ -150,6 +151,7 @@ def summarize_incident(incident: Incident) -> IncidentSummary:
         description=description,
     )
 
+
 def _classify_attack_pattern(
     auth_failed: int,
     auth_success: int,
@@ -157,6 +159,11 @@ def _classify_attack_pattern(
     targeted_users: List[str],
     has_success_after_failures: bool,
 ) -> tuple[str, str]:
+    """
+    Classify SSH attack pattern based on auth behavior and targeted user spread.
+    """
+    unique_users = len(targeted_users)
+
     # Possible account compromise: failures then success
     if has_success_after_failures and auth_success > 0:
         return (
@@ -164,10 +171,13 @@ def _classify_attack_pattern(
             "failed SSH authentications followed by successful login(s) for the same source IP",
         )
 
-    unique_users = len(targeted_users)
-
-    # Username or password spray: many users, all failures
-    if auth_failed >= 100 and unique_users >= 5 and auth_success == 0 and auth_fail_ratio >= 0.9:
+    # Username / password spray: many users, all failures
+    if (
+        auth_failed >= 100
+        and unique_users >= 5
+        and auth_success == 0
+        and auth_fail_ratio >= 0.9
+    ):
         return (
             "password_spray",
             f"high-volume failed SSH authentication attempts ({auth_failed}) against "
@@ -189,7 +199,7 @@ def _classify_attack_pattern(
             "low-volume failed SSH authentication activity without clear brute-force characteristics",
         )
 
-    # Default
+    # Default suspicious auth activity
     return (
         "suspicious_auth_activity",
         "SSH authentication pattern shows some suspicious characteristics but does not match a more specific pattern",
@@ -198,6 +208,7 @@ def _classify_attack_pattern(
 
 SEVERITY_TO_SCORE = {"low": 25, "medium": 50, "high": 80}
 CONFIDENCE_TO_SCORE = {"low": 30, "medium": 60, "high": 85}
+
 
 def _compute_priority(
     severity: str,
@@ -231,17 +242,39 @@ def _compute_severity(
     auth_failed: int,
     auth_fail_ratio: float,
     has_success_after_failures: bool = False,
+    auth_failed_streak_max: int = 0,
+    auth_burst_max_per_minute: int = 0,
 ) -> str:
+    """
+    Severity uses anomaly score, failed volume/ratio, and SSH intensity indicators.
+    """
+
+    # Compromise-like: failures then success, plus decent anomaly and volume
     if has_success_after_failures and avg_anomaly_score >= 0.20 and auth_failed >= 20:
         return "high"
 
-    if avg_anomaly_score >= 0.35 and auth_failed >= 500 and auth_fail_ratio >= 0.95:
+    # Extremely automated behavior: very high volume and intensity
+    if (
+        auth_failed >= 1000
+        and auth_fail_ratio >= 0.95
+        and (auth_failed_streak_max >= 200 or auth_burst_max_per_minute >= 500)
+    ):
         return "high"
 
-    if avg_anomaly_score >= 0.25 and auth_failed >= 200 and auth_fail_ratio >= 0.90:
+    # Strong brute-force pattern
+    if (
+        avg_anomaly_score >= 0.25
+        and auth_failed >= 500
+        and auth_fail_ratio >= 0.90
+    ):
         return "high"
 
-    if avg_anomaly_score >= 0.15 and auth_failed >= 50 and auth_fail_ratio >= 0.70:
+    # Elevated, but not extreme
+    if (
+        avg_anomaly_score >= 0.15
+        and auth_failed >= 50
+        and auth_fail_ratio >= 0.70
+    ):
         return "medium"
 
     return "low"
@@ -252,18 +285,32 @@ def _severity_reason(
     auth_failed: int,
     auth_fail_ratio: float,
     has_success_after_failures: bool = False,
+    auth_failed_streak_max: int = 0,
+    auth_burst_max_per_minute: int = 0,
 ) -> str:
     if has_success_after_failures and avg_anomaly_score >= 0.20 and auth_failed >= 20:
-        return "failures followed by successful SSH login(s)"
+        return "failures followed by successful SSH login(s) with elevated anomaly score"
 
-    if avg_anomaly_score >= 0.35 and auth_failed >= 500 and auth_fail_ratio >= 0.95:
-        return "very high failed-auth volume with high anomaly score"
+    if (
+        auth_failed >= 1000
+        and auth_fail_ratio >= 0.95
+        and (auth_failed_streak_max >= 200 or auth_burst_max_per_minute >= 500)
+    ):
+        return "extremely high failed-auth volume with intense automated behavior"
 
-    if avg_anomaly_score >= 0.25 and auth_failed >= 200 and auth_fail_ratio >= 0.90:
-        return "sustained failed-auth pattern with elevated anomaly score"
+    if (
+        avg_anomaly_score >= 0.25
+        and auth_failed >= 500
+        and auth_fail_ratio >= 0.90
+    ):
+        return "very high failed-auth volume with elevated anomaly score"
 
-    if avg_anomaly_score >= 0.15 and auth_failed >= 50 and auth_fail_ratio >= 0.70:
-        return "moderate failed-auth volume with elevated anomaly score"
+    if (
+        avg_anomaly_score >= 0.15
+        and auth_failed >= 50
+        and auth_fail_ratio >= 0.70
+    ):
+        return "moderate to high failed-auth volume with elevated anomaly score"
 
     return "limited authentication activity and anomaly score"
 
@@ -274,11 +321,19 @@ def _compute_confidence(
     auth_fail_ratio: float,
     session_count: int,
     has_success_after_failures: bool = False,
+    auth_failed_streak_max: int = 0,
+    auth_burst_max_per_minute: int = 0,
 ) -> str:
+    """
+    Confidence increases with repeated evidence, high volume, and success-after-failures.
+    """
+
     if (
         has_success_after_failures
         or (auth_failed >= 100 and session_count >= 2 and auth_fail_ratio >= 0.90)
         or (avg_anomaly_score >= 0.30 and auth_failed >= 50 and session_count >= 2)
+        or auth_failed_streak_max >= 200
+        or auth_burst_max_per_minute >= 500
     ):
         return "high"
 
@@ -299,12 +354,20 @@ def _confidence_reason(
     auth_fail_ratio: float,
     session_count: int,
     has_success_after_failures: bool = False,
+    auth_failed_streak_max: int = 0,
+    auth_burst_max_per_minute: int = 0,
 ) -> str:
     if has_success_after_failures:
         return "successful authentication occurred after failed attempts"
 
+    if auth_failed_streak_max >= 200:
+        return "very long consecutive failed-auth streak indicating automated guessing"
+
+    if auth_burst_max_per_minute >= 500:
+        return "very high SSH event rate consistent with automated attack tooling"
+
     if auth_failed >= 100 and session_count >= 2 and auth_fail_ratio >= 0.90:
-        return "repeated failed authentications across multiple sessions"
+        return "repeated high-volume failed authentications across multiple sessions"
 
     if avg_anomaly_score >= 0.30 and auth_failed >= 50 and session_count >= 2:
         return "elevated anomaly score with repeated suspicious activity"
@@ -395,7 +458,6 @@ def group_sessions_to_incidents(
         if not sess:
             continue
 
-
         by_key[incident_key].append(
             {
                 "session_id": row["session_id"],
@@ -465,7 +527,9 @@ def group_sessions_to_incidents(
             has_success_after_failures = total_failed > 0 and total_success > 0
 
             session_ids = [s["session_id"] for s in cluster]
-            timestamps = [s["start_time"] for s in cluster] + [s["end_time"] for s in cluster]
+            timestamps = [s["start_time"] for s in cluster] + [
+                s["end_time"] for s in cluster
+            ]
 
             first_seen = min(timestamps) if timestamps else None
             last_seen = max(timestamps) if timestamps else None
@@ -475,6 +539,8 @@ def group_sessions_to_incidents(
                 total_failed,
                 auth_fail_ratio,
                 has_success_after_failures,
+                auth_failed_streak_max=auth_failed_streak_max,
+                auth_burst_max_per_minute=auth_burst_max_per_minute,
             )
 
             reason = _severity_reason(
@@ -482,6 +548,8 @@ def group_sessions_to_incidents(
                 total_failed,
                 auth_fail_ratio,
                 has_success_after_failures,
+                auth_failed_streak_max=auth_failed_streak_max,
+                auth_burst_max_per_minute=auth_burst_max_per_minute,
             )
 
             confidence = _compute_confidence(
@@ -490,6 +558,8 @@ def group_sessions_to_incidents(
                 auth_fail_ratio,
                 len(session_ids),
                 has_success_after_failures,
+                auth_failed_streak_max=auth_failed_streak_max,
+                auth_burst_max_per_minute=auth_burst_max_per_minute,
             )
 
             confidence_reason = _confidence_reason(
@@ -498,6 +568,8 @@ def group_sessions_to_incidents(
                 auth_fail_ratio,
                 len(session_ids),
                 has_success_after_failures,
+                auth_failed_streak_max=auth_failed_streak_max,
+                auth_burst_max_per_minute=auth_burst_max_per_minute,
             )
 
             attack_pattern, attack_pattern_reason = _classify_attack_pattern(
@@ -553,8 +625,9 @@ def group_sessions_to_incidents(
             inc.avg_anomaly_score,
         ),
         reverse=True,
-    ) 
+    )
     return incidents
+
 
 def _describe_auth_intensity(incident: Incident) -> str:
     parts: List[str] = []
@@ -572,6 +645,7 @@ def _describe_auth_intensity(incident: Incident) -> str:
         return ""
     return " Authentication intensity: " + " ".join(parts) + "."
 
+
 def build_incident_report(
     incidents: List[Incident],
     total_sessions: Optional[int] = None,
@@ -579,7 +653,7 @@ def build_incident_report(
     top_n: int = 5,
 ) -> dict:
     severity_counts = Counter(inc.severity for inc in incidents)
-    
+
     confidence_counts = Counter(
         inc.confidence for inc in incidents if inc.confidence
     )
@@ -589,7 +663,7 @@ def build_incident_report(
         for inc in incidents
         if getattr(inc, "priority", None)
     )
-       
+
     attack_pattern_counts = Counter(
         getattr(inc, "attack_pattern", None)
         for inc in incidents
