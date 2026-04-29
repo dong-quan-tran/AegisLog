@@ -1164,3 +1164,70 @@ Decide whether cli.py should remain a compatibility surface for helper imports l
 Add or update CLI-focused tests around build_parser() so parser existence, subcommand registration, and dispatch assumptions are covered explicitly.
 
 If energy is lower tomorrow, make the first task just the cli_train.py extraction, since that is the cleanest next incremental refactor and keeps momentum without opening too many fronts.
+
+Here’s a concise progress log for **Day 1 — Finish SSH**.
+
+## Progress log 04/28/2026
+
+## High-level outcome
+
+- SSH detection is **feature-complete** for this phase: richer behavioral features, stronger incident scoring, clear attack patterns, and dedicated tests all in place.
+
+## Code changes
+
+- **Feature extraction (`behavioral.py`):**
+  - Added SSH-focused behavioral features:
+    - `auth_failed_streak_max` (longest failed-auth streak).
+    - `success_after_failure_count` (count of successes occurring after failures).
+    - `auth_burst_max_per_minute` (peak events per 60s window).
+    - `mean_inter_event_gap_seconds`, `max_inter_event_gap_seconds`.
+    - `ssh_distinct_users`, `ssh_distinct_ips_per_user`, `ssh_distinct_targeted_users`.
+    - `ssh_rare_hour` (early-hours activity flag).
+    - `first_seen_ip_flag`, `first_seen_user_flag` (within-batch first-seen).  
+  - Ensured these are all returned in `sessions_to_features(...)`.
+
+- **Model pipeline (`pipeline.py`):**
+  - Extended `NUMERIC_FEATURES` to include all new SSH features so they are used by Isolation Forest / OCSVM / LOF.
+
+- **Incident logic (`incidents.py`):**
+  - Extended `Incident` with:
+    - `auth_failed_streak_max`
+    - `auth_burst_max_per_minute`
+  - Aggregated these per incident cluster (max across sessions).
+  - Updated severity and confidence:
+    - High severity for extremely high failure volume + strong automation signals (long streaks / high bursts).
+    - High confidence when there is strong evidence such as success-after-failures, long streaks, and/or high bursts.
+  - Updated severity/confidence reasons to mention:
+    - “extremely high failed-auth volume with intense automated behavior.”
+    - “very long consecutive failed-auth streak indicating automated guessing.”
+  - Kept and refined attack patterns:
+    - `possible_compromise`, `password_spray`, `brute_force`, `low_signal`, `suspicious_auth_activity`.
+  - Enriched summaries:
+    - “Authentication intensity: maximum consecutive failed attempts reached …” plus recommended actions.
+
+## Tests and verification
+
+- Added unit tests:
+  - High-severity/high-confidence brute-force incident test for the new thresholds and reasons.
+  - `success_after_failure_count` behavior test.
+- Ran:
+  - `python -m pytest` (full suite, all tests passing).
+  - Manual SSH runs:
+    - `python -m aegislog.cli analyze ... --log-type ssh_auth`
+    - `python -m aegislog.cli incidents ... --log-type ssh_auth`
+  - Observed top SSH incidents now show:
+    - `severity=high`, `confidence=high`, `priority=critical`.
+    - Clear brute-force pattern and intensity wording.
+
+## Commits (suggested messages you used/planned)
+
+- `feat(ssh-features): add success-after-failure, inter-event gaps, and first-seen flags`
+- `feat(ssh-incidents): finalize ssh incident severity and intensity-based scoring`
+- `test(ssh-incidents): cover high severity and confidence for extreme brute-force`
+
+## Status of Day 1 plan
+
+- Add SSH-specific features → **Done** (including extra timing and first-seen flags).
+- Improve SSH incident evidence → **Done** (richer summaries, patterns, and reasons).
+- Add/update SSH unit tests → **Done**.
+- Run `python -m pytest` → **Done**, full suite passing.
