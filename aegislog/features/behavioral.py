@@ -130,7 +130,20 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
         level_counts = Counter(levels)
         error_events = level_counts.get("error", 0)
         notice_events = level_counts.get("notice", 0)
+        warn_events = level_counts.get("warn", 0)
+        crit_events = level_counts.get("crit", 0)
+        alert_events = level_counts.get("alert", 0)
+        emerg_events = level_counts.get("emerg", 0)
+
         error_event_ratio = error_events / total if total else 0.0
+
+        apache_error_vs_notice_ratio = (
+            error_events / notice_events if notice_events else float(error_events > 0)
+        )
+        apache_high_severity_events = crit_events + alert_events + emerg_events
+        apache_high_severity_ratio = (
+            apache_high_severity_events / total if total else 0.0
+        )
 
         auth_failed = sum(1 for c in statuses if c == 401)
         auth_success = sum(1 for c in statuses if c == 200)
@@ -178,16 +191,26 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
             events,
             lambda e: e.status is not None and 500 <= e.status < 600,
         )
+        apache_error_burst_max_per_minute = _compute_filtered_burst_max_per_minute(
+            events,
+            lambda e: e.user_agent == "error",
+        )
+
         apache_distinct_paths = len({ev.path for ev in events if ev.path})
 
         path_events = [ev.path for ev in events if ev.path]
         rare_path_count = sum(1 for p in path_events if all_paths[p] == 1)
         apache_rare_path_ratio = rare_path_count / len(path_events) if path_events else 0.0
 
-        session_messages = [getattr(ev, "message", None) for ev in events if getattr(ev, "message", None)]
+        session_messages = [
+            getattr(ev, "message", None) for ev in events if getattr(ev, "message", None)
+        ]
+        apache_distinct_message_templates = len(set(session_messages))
+
         rare_error_message_count = sum(
             1 for msg in session_messages if all_error_messages[msg] == 1
         )
+        apache_rare_error_message_count = rare_error_message_count
         apache_rare_error_message_ratio = (
             rare_error_message_count / len(session_messages) if session_messages else 0.0
         )
@@ -231,10 +254,16 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
                 "apache_5xx_streak_max": apache_5xx_streak_max,
                 "apache_404_burst_max_per_minute": apache_404_burst_max_per_minute,
                 "apache_5xx_burst_max_per_minute": apache_5xx_burst_max_per_minute,
+                "apache_error_burst_max_per_minute": apache_error_burst_max_per_minute,
                 "apache_distinct_paths": apache_distinct_paths,
                 "apache_rare_path_ratio": apache_rare_path_ratio,
+                "apache_distinct_message_templates": apache_distinct_message_templates,
+                "apache_rare_error_message_count": apache_rare_error_message_count,
                 "apache_rare_error_message_ratio": apache_rare_error_message_ratio,
                 "apache_rare_hour": apache_rare_hour,
+                "apache_error_vs_notice_ratio": apache_error_vs_notice_ratio,
+                "apache_high_severity_events": apache_high_severity_events,
+                "apache_high_severity_ratio": apache_high_severity_ratio,
             }
         )
     return pd.DataFrame(rows)
