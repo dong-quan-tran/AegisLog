@@ -17,6 +17,19 @@ def _compute_auth_failed_streak_max(statuses: list[int]) -> int:
     return max_streak
 
 
+def _compute_status_streak_max(statuses: list[int], predicate) -> int:
+    streak = 0
+    max_streak = 0
+    for s in statuses:
+        if predicate(s):
+            streak += 1
+            if streak > max_streak:
+                max_streak = streak
+        else:
+            streak = 0
+    return max_streak
+
+
 def _compute_success_after_failure_count(statuses: list[int]) -> int:
     """
     Count how many successful auths (200) occur after at least
@@ -33,7 +46,6 @@ def _compute_success_after_failure_count(statuses: list[int]) -> int:
 
 
 def _compute_burst_max_per_minute(timestamps) -> int:
-    # timestamps is expected to be a sequence/Index of pandas Timestamps
     if timestamps is None or len(timestamps) == 0:
         return 0
     left = 0
@@ -45,6 +57,13 @@ def _compute_burst_max_per_minute(timestamps) -> int:
         if window_size > max_count:
             max_count = window_size
     return max_count
+
+
+def _compute_filtered_burst_max_per_minute(events, predicate) -> int:
+    filtered_ts = [e.timestamp for e in events if predicate(e)]
+    if not filtered_ts:
+        return 0
+    return _compute_burst_max_per_minute(pd.to_datetime(filtered_ts))
 
 
 def _compute_inter_event_gaps_seconds(timestamps) -> tuple[float, float]:
@@ -75,10 +94,12 @@ def _compute_rare_hour_flag(timestamps) -> int:
 
 def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
     rows = []
-    # Pre-compute simple "first seen in this batch" indices for IP and user
-    # based on session start_time.
+
     ip_first_seen: dict[str, float] = {}
     user_first_seen: dict[str, float] = {}
+
+    all_paths = Counter()
+    all_error_messages = Counter()
 
     for s in sessions:
         if s.ip:
@@ -87,6 +108,12 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
         if s.user:
             ts = s.start_time.timestamp()
             user_first_seen[s.user] = min(user_first_seen.get(s.user, ts), ts)
+
+        for ev in s.events:
+            if ev.path:
+                all_paths[ev.path] += 1
+            if getattr(ev, "message", None):
+                all_error_messages[ev.message] += 1
 
     for s in sessions:
         events = s.events
@@ -115,10 +142,10 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
         source_count = len(s.source_set)
         has_mixed_sources = 1 if len(s.source_set) > 1 else 0
 
-        # --- SSH-focused features ---
         timestamps = [e.timestamp for e in events]
         pd_ts = pd.to_datetime(timestamps)
 
+        # --- SSH-focused features ---
         auth_failed_streak_max = _compute_auth_failed_streak_max(statuses)
         success_after_failure_count = _compute_success_after_failure_count(statuses)
         auth_burst_max_per_minute = _compute_burst_max_per_minute(pd_ts)
@@ -128,22 +155,44 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
         ssh_distinct_ips_per_user = len(
             {(ev.user, ev.ip) for ev in events if ev.user and ev.ip}
         )
-        # Explicit alias for clarity with your checklist wording
         ssh_distinct_targeted_users = ssh_distinct_users
-
         ssh_rare_hour = _compute_rare_hour_flag(pd_ts)
 
-        # First-seen flags within this batch (earliest session start_time for IP/user)
         first_seen_ip_flag = 0
         first_seen_user_flag = 0
         if s.ip:
-            first_seen_ip_flag = (
-                1 if s.start_time.timestamp() == ip_first_seen.get(s.ip) else 0
-            )
+            first_seen_ip_flag = 1 if s.start_time.timestamp() == ip_first_seen.get(s.ip) else 0
         if s.user:
-            first_seen_user_flag = (
-                1 if s.start_time.timestamp() == user_first_seen.get(s.user) else 0
-            )
+            first_seen_user_flag = 1 if s.start_time.timestamp() == user_first_seen.get(s.user) else 0
+
+        # --- Apache-focused features ---
+        apache_5xx_streak_max = _compute_status_streak_max(
+            statuses,
+            lambda s: s is not None and 500 <= s < 600,
+        )
+        apache_404_burst_max_per_minute = _compute_filtered_burst_max_per_minute(
+            events,
+            lambda e: e.status == 404,
+        )
+        apache_5xx_burst_max_per_minute = _compute_filtered_burst_max_per_minute(
+            events,
+            lambda e: e.status is not None and 500 <= e.status < 600,
+        )
+        apache_distinct_paths = len({ev.path for ev in events if ev.path})
+
+        path_events = [ev.path for ev in events if ev.path]
+        rare_path_count = sum(1 for p in path_events if all_paths[p] == 1)
+        apache_rare_path_ratio = rare_path_count / len(path_events) if path_events else 0.0
+
+        session_messages = [getattr(ev, "message", None) for ev in events if getattr(ev, "message", None)]
+        rare_error_message_count = sum(
+            1 for msg in session_messages if all_error_messages[msg] == 1
+        )
+        apache_rare_error_message_ratio = (
+            rare_error_message_count / len(session_messages) if session_messages else 0.0
+        )
+
+        apache_rare_hour = _compute_rare_hour_flag(pd_ts)
         # --------------------------------
 
         rows.append(
@@ -178,6 +227,14 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
                 "ssh_rare_hour": ssh_rare_hour,
                 "first_seen_ip_flag": first_seen_ip_flag,
                 "first_seen_user_flag": first_seen_user_flag,
+                # Apache feature columns
+                "apache_5xx_streak_max": apache_5xx_streak_max,
+                "apache_404_burst_max_per_minute": apache_404_burst_max_per_minute,
+                "apache_5xx_burst_max_per_minute": apache_5xx_burst_max_per_minute,
+                "apache_distinct_paths": apache_distinct_paths,
+                "apache_rare_path_ratio": apache_rare_path_ratio,
+                "apache_rare_error_message_ratio": apache_rare_error_message_ratio,
+                "apache_rare_hour": apache_rare_hour,
             }
         )
     return pd.DataFrame(rows)
