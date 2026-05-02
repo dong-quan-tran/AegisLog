@@ -48,10 +48,16 @@ NUMERIC_FEATURES = [
     "apache_5xx_streak_max",
     "apache_404_burst_max_per_minute",
     "apache_5xx_burst_max_per_minute",
+    "apache_error_burst_max_per_minute",
     "apache_distinct_paths",
     "apache_rare_path_ratio",
+    "apache_distinct_message_templates",
+    "apache_rare_error_message_count",
     "apache_rare_error_message_ratio",
     "apache_rare_hour",
+    "apache_error_vs_notice_ratio",
+    "apache_high_severity_events",
+    "apache_high_severity_ratio",
 ]
 
 def build_ocsvm_pipeline(
