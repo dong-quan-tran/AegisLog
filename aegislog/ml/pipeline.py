@@ -44,6 +44,14 @@ NUMERIC_FEATURES = [
     "ssh_rare_hour",
     "first_seen_ip_flag",
     "first_seen_user_flag",
+    # Apache-focused features
+    "apache_5xx_streak_max",
+    "apache_404_burst_max_per_minute",
+    "apache_5xx_burst_max_per_minute",
+    "apache_distinct_paths",
+    "apache_rare_path_ratio",
+    "apache_rare_error_message_ratio",
+    "apache_rare_hour",
 ]
 
 def build_ocsvm_pipeline(
