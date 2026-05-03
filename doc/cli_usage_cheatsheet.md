@@ -5,7 +5,7 @@
 From the project root (with your virtualenv activated):
 
 ```bash
-# 1) See the noisiest sessions
+# 1) See the noisiest SSH sessions
 python -m aegislog.cli analyze data/loghub/SSH.log --log-type ssh_auth --top 10
 
 # 2) See the worst SSH incidents (medium+ severity)
@@ -13,6 +13,12 @@ python -m aegislog.cli incidents data/loghub/SSH.log --log-type ssh_auth --min-s
 
 # 3) Explain the highest-severity SSH incident
 python -m aegislog.cli explain data/loghub/SSH.log --log-type ssh_auth --min-severity high --first
+
+# 4) See the top suspicious Apache error sessions (using Apache model defaults)
+python -m aegislog.cli analyze data/loghub/Apache.log --log-type apache_error --top 10
+
+# 5) Use the dedicated Apache CLI to inspect suspicious sessions
+python -m aegislog.cli_apache data/loghub/Apache.log -n 20
 ```
 
 ---
@@ -34,6 +40,10 @@ Available subcommands:
 - `explain`
 - `report`
 
+Additional Apache-specific CLI:
+
+- `cli_apache` (run via `python -m aegislog.cli_apache`)
+
 ---
 
 ## init
@@ -51,14 +61,28 @@ python -m aegislog.cli init
 Train an anomaly detection model on logs and save it.
 
 ```bash
+# SSH example
 python -m aegislog.cli train \
   --logs-path data/loghub/SSH.log \
-  --model-path models/log_anomaly_iforest.joblib
+  --log-type ssh_auth \
+  --model-path models/log_anomaly_iforest_ssh.joblib
+
+# Apache error example
+python -m aegislog.cli train \
+  --logs-path data/loghub/Apache.log \
+  --log-type apache_error \
+  --model-path models/log_anomaly_iforest_apache.joblib
 ```
 
+Key options:
+
 - `--logs-path` (required): Path to training log file.  
+- `--log-type`: Feature extractor / pipeline to use:
+  - `ssh_auth`
+  - `apache_error`
 - `--model-path` (optional): Where to save the trained model.  
-  Default: `models/log_anomaly_iforest.joblib`.
+  Default: `models/log_anomaly_iforest.joblib` (or a log-type-specific default).
+- `--model-type`: `iforest` (default), `ocsvm`, `lof`.
 
 ---
 
@@ -67,10 +91,18 @@ python -m aegislog.cli train \
 Analyze logs, score sessions, and print top anomalous sessions.
 
 ```bash
+# SSH: analyze auth log
 python -m aegislog.cli analyze \
   data/loghub/SSH.log \
   --log-type ssh_auth \
   --model-path models/log_anomaly_iforest_ssh.joblib \
+  --top 10
+
+# Apache: analyze error log
+python -m aegislog.cli analyze \
+  data/loghub/Apache.log \
+  --log-type apache_error \
+  --model-path models/log_anomaly_iforest_apache.joblib \
   --top 10
 ```
 
@@ -78,7 +110,7 @@ Common options:
 
 - `log_path` (positional): Path to log file to analyze.
 - `--log-type`:
-  - `apache_error` (default)
+  - `apache_error`
   - `ssh_auth`
 - `--model-path`: Path to trained model.  
   Defaults depend on `--log-type` / `--profile`.
@@ -227,7 +259,7 @@ Options:
 
 ## report
 
-Summarize anomalous sessions and grouped incidents with aggregate metrics.
+Summarize anomalous sessions and grouped incidents with aggregate metrics (SSH).
 
 ### Text output
 
@@ -278,3 +310,40 @@ JSON reports include:
 - `attack_pattern_counts`
 - `top_incident_ips`
 - `top_targeted_users`
+
+---
+
+## Apache-specific CLI (`cli_apache`)
+
+For quick inspection of suspicious Apache error sessions, you can use the dedicated Apache CLI, which runs directly on `.log` files.
+
+### Basic usage
+
+```bash
+python -m aegislog.cli_apache data/loghub/Apache.log -n 20
+```
+
+This will:
+
+- Parse the Apache error log (`Apache.log`).
+- Build sessions and Apache-focused features (error vs notice ratio, bursts, rare templates, rare hour, etc.).
+- Score sessions using the resolved Apache model (or defaults).
+- Print the top 20 suspicious sessions with:
+
+  - session id (derived from session timeframe),
+  - anomaly score,
+  - error ratio,
+  - 5xx burst size,
+  - human-readable notes (e.g. “errors dominate over notices”, “many rare error templates”, “activity during unusual hours”).
+
+### Options
+
+- `log_path` (positional): Path to Apache error log file.
+- `--log-type`: Currently `apache_error` only (default).
+- `--model-path`: Path to Apache anomaly model.  
+  If omitted, uses the Apache default for the selected `--model-type`.
+- `--model-type`: `iforest` (default), `ocsvm`, `lof`.
+- `-n`, `--top`: Number of top suspicious sessions to show.  
+  Default: `20`.
+
+This is the fastest way to get a human-readable view of suspicious Apache error behavior without going through the full `analyze`/`incidents` flow.
