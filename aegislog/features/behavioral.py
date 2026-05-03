@@ -101,19 +101,48 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
     all_paths = Counter()
     all_error_messages = Counter()
 
+    # For baseline/deviation: how many sessions and events we see per IP/user
+    ip_session_counts: dict[str, int] = Counter()
+    user_session_counts: dict[str, int] = Counter()
+    ip_total_events: dict[str, int] = Counter()
+    user_total_events: dict[str, int] = Counter()
+
     for s in sessions:
         if s.ip:
             ts = s.start_time.timestamp()
             ip_first_seen[s.ip] = min(ip_first_seen.get(s.ip, ts), ts)
+            ip_session_counts[s.ip] += 1
+            ip_total_events[s.ip] += len(s.events)
         if s.user:
             ts = s.start_time.timestamp()
             user_first_seen[s.user] = min(user_first_seen.get(s.user, ts), ts)
+            user_session_counts[s.user] += 1
+            user_total_events[s.user] += len(s.events)
 
         for ev in s.events:
             if ev.path:
                 all_paths[ev.path] += 1
             if getattr(ev, "message", None):
                 all_error_messages[ev.message] += 1
+
+    # Compute simple per-identity baselines: average events per session
+    ip_baseline_events_per_session: dict[str, float] = {}
+    for ip, sess_count in ip_session_counts.items():
+        total_ev = ip_total_events.get(ip, 0)
+        ip_baseline_events_per_session[ip] = (
+            float(total_ev) / sess_count if sess_count else 0.0
+        )
+
+    user_baseline_events_per_session: dict[str, float] = {}
+    for user, sess_count in user_session_counts.items():
+        total_ev = user_total_events.get(user, 0)
+        user_baseline_events_per_session[user] = (
+            float(total_ev) / sess_count if sess_count else 0.0
+        )
+
+    # Define a simple "rare seen" threshold in session counts
+    # (e.g., fewer than 3 sessions for that identity in this dataset)
+    RARE_SEEN_THRESHOLD = 3
 
     for s in sessions:
         events = s.events
@@ -171,12 +200,39 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
         ssh_distinct_targeted_users = ssh_distinct_users
         ssh_rare_hour = _compute_rare_hour_flag(pd_ts)
 
+        # --- First-seen / rare-seen baseline signals ---
         first_seen_ip_flag = 0
         first_seen_user_flag = 0
+        rare_seen_ip_flag = 0
+        rare_seen_user_flag = 0
+
+        ip_events_per_session = 0.0
+        ip_events_per_session_deviation = 0.0
+        user_events_per_session = 0.0
+        user_events_per_session_deviation = 0.0
+
         if s.ip:
-            first_seen_ip_flag = 1 if s.start_time.timestamp() == ip_first_seen.get(s.ip) else 0
+            ip_ts_first = ip_first_seen.get(s.ip)
+            first_seen_ip_flag = 1 if s.start_time.timestamp() == ip_ts_first else 0
+
+            ip_sessions = ip_session_counts.get(s.ip, 0)
+            rare_seen_ip_flag = 1 if ip_sessions > 0 and ip_sessions < RARE_SEEN_THRESHOLD else 0
+
+            baseline = ip_baseline_events_per_session.get(s.ip, 0.0)
+            ip_events_per_session = baseline
+            # deviation = current session events - baseline
+            ip_events_per_session_deviation = float(total) - baseline
+
         if s.user:
-            first_seen_user_flag = 1 if s.start_time.timestamp() == user_first_seen.get(s.user) else 0
+            user_ts_first = user_first_seen.get(s.user)
+            first_seen_user_flag = 1 if s.start_time.timestamp() == user_ts_first else 0
+
+            user_sessions = user_session_counts.get(s.user, 0)
+            rare_seen_user_flag = 1 if user_sessions > 0 and user_sessions < RARE_SEEN_THRESHOLD else 0
+
+            baseline_u = user_baseline_events_per_session.get(s.user, 0.0)
+            user_events_per_session = baseline_u
+            user_events_per_session_deviation = float(total) - baseline_u
 
         # --- Apache-focused features ---
         apache_5xx_streak_max = _compute_status_streak_max(
@@ -248,8 +304,15 @@ def sessions_to_features(sessions: List[Session]) -> pd.DataFrame:
                 "ssh_distinct_ips_per_user": ssh_distinct_ips_per_user,
                 "ssh_distinct_targeted_users": ssh_distinct_targeted_users,
                 "ssh_rare_hour": ssh_rare_hour,
+                # Baseline / first-seen / rare-seen features
                 "first_seen_ip_flag": first_seen_ip_flag,
                 "first_seen_user_flag": first_seen_user_flag,
+                "rare_seen_ip_flag": rare_seen_ip_flag,
+                "rare_seen_user_flag": rare_seen_user_flag,
+                "ip_events_per_session": ip_events_per_session,
+                "ip_events_per_session_deviation": ip_events_per_session_deviation,
+                "user_events_per_session": user_events_per_session,
+                "user_events_per_session_deviation": user_events_per_session_deviation,
                 # Apache feature columns
                 "apache_5xx_streak_max": apache_5xx_streak_max,
                 "apache_404_burst_max_per_minute": apache_404_burst_max_per_minute,
