@@ -1233,8 +1233,6 @@ Here’s a concise progress log for **Day 1 — Finish SSH**.
 - Run `python -m pytest` → **Done**, full suite passing.
 
 
-Yesterday you took Apache from “pieces exist” to a fully working, tested slice of the system. Here’s a concise progress log you can drop into a journal or PR description.
-
 ***
 
 
@@ -1280,3 +1278,57 @@ Yesterday you took Apache from “pieces exist” to a fully working, tested sli
      - Anomaly scoring via the shared ML pipeline.
      - A log-based CLI (`cli_apache`) that surfaces top suspicious Apache sessions with interpretable notes.
      - Behavioral and CLI tests passing, plus manual validation on the LogHub sample.
+
+
+***
+
+## Progress log – Sunday, May 3, 2026 (Day 3 – Improve ML)
+
+1. **Baseline and deviation features for identities**
+   - Extended `sessions_to_features` in `behavioral.py` to compute per-identity baselines:
+     - Per-IP baseline: `ip_events_per_session` (average events per session for each IP in the dataset).
+     - Per-user baseline: `user_events_per_session` (average events per session for each user).
+   - Added deviation features:
+     - `ip_events_per_session_deviation` = current session `event_count` − IP baseline.
+     - `user_events_per_session_deviation` = current session `event_count` − user baseline.
+   - Implemented “rare-seen” indicators driven by session counts:
+     - `rare_seen_ip_flag` for identities with fewer than a small number of sessions.
+     - `rare_seen_user_flag` using the same idea, but by user.
+   - Kept existing first-seen signals and wired them into the same block:
+     - `first_seen_ip_flag`
+     - `first_seen_user_flag`
+
+2. **Feature wiring into the ML pipeline**
+   - Updated `NUMERIC_FEATURES` in the pipeline to include the new baseline/rare-seen fields so all three model types (IF / OCSVM / LOF) see the same richer feature set:
+     - `rare_seen_ip_flag`, `rare_seen_user_flag`
+     - `ip_events_per_session`, `ip_events_per_session_deviation`
+     - `user_events_per_session`, `user_events_per_session_deviation`
+
+3. **Behavioral tests for baseline features**
+   - Introduced a dedicated `test_behavioral_baseline.py` to keep Day 3 logic clearly scoped.
+   - Built synthetic SSH-style sessions for multiple identities:
+     - Multiple sessions for a shared IP/user (`1.1.1.1` / `alice`) with event counts 2, 4, 8.
+     - A separate identity (`2.2.2.2` / `bob`) with a single 3-event session.
+   - Asserted:
+     - Correct first-seen flags for the earliest session (`s1`) and zero for later ones.
+     - Correct rare-seen behavior: “common” identity not rare, single-session identity marked rare.
+     - Baseline averages: `(2 + 4 + 8) / 3` events per session for the shared IP/user.
+     - Deviations equal `event_count - baseline` for each session.
+     - Single-session identity has baseline equal to its own event count and zero deviation.
+   - Left Apache-specific tests in `test_behavioral_apache.py` and helper logic in SSH-oriented tests, preserving a clean separation.
+
+4. **Test structure and naming clean-up**
+   - Clarified the test layout and responsibilities:
+     - `test_behavioral_apache.py` for Apache-specific features.
+     - `test_behavioral_baseline.py` for first-seen, rare-seen, and baseline deviation features.
+     - The existing `test_behavioral.py` remains as the place for generic behavioral/SSH helpers for now, with a plan to eventually rename/split into `test_behavioral_ssh.py` once more SSH-specific tests are added.
+   - Captured a mental model of a future test layout that groups tests by feature (SSH, Apache, baseline, CLI) while keeping the current files small and understandable.
+
+5. **Commit planning**
+   - Chose clear, focused commit messages for today’s changes:
+     - For `behavioral.py`: `feat: add ip/user baseline deviation and rare-seen features`
+     - For pipeline feature wiring: `chore: include baseline deviation features in numeric pipeline`
+
+***
+
+Net result: Day 3 is now grounded with concrete IP/user baseline features, properly wired into the pipeline and covered by tests. The next time you sit down, you’re ready to: (1) re-train models with the richer feature set, and (2) start building a small experiment harness to compare IF / OCSVM / LOF in a more systematic way.
