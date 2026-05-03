@@ -42,8 +42,15 @@ NUMERIC_FEATURES = [
     "ssh_distinct_ips_per_user",
     "ssh_distinct_targeted_users",
     "ssh_rare_hour",
+    # Baseline / first-seen / rare-seen features
     "first_seen_ip_flag",
     "first_seen_user_flag",
+    "rare_seen_ip_flag",
+    "rare_seen_user_flag",
+    "ip_events_per_session",
+    "ip_events_per_session_deviation",
+    "user_events_per_session",
+    "user_events_per_session_deviation",
     # Apache-focused features
     "apache_5xx_streak_max",
     "apache_404_burst_max_per_minute",
