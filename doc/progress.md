@@ -1231,3 +1231,52 @@ Here’s a concise progress log for **Day 1 — Finish SSH**.
 - Improve SSH incident evidence → **Done** (richer summaries, patterns, and reasons).
 - Add/update SSH unit tests → **Done**.
 - Run `python -m pytest` → **Done**, full suite passing.
+
+
+Yesterday you took Apache from “pieces exist” to a fully working, tested slice of the system. Here’s a concise progress log you can drop into a journal or PR description.
+
+***
+
+
+## Progress log – Saturday, May 2, 2026 (Apache focus)
+
+1. **Apache error log parsing and features**
+   - Verified `apache_error.py` correctly parses Apache error log lines into `LogEvent` objects with timestamps and levels (stored in `user_agent`).
+   - Extended `sessions_to_features` in `behavioral.py` with Apache-focused features:
+     - Error-level metrics: `apache_error_vs_notice_ratio`, `apache_error_burst_max_per_minute`, `apache_high_severity_events`, `apache_high_severity_ratio`.
+     - Status/code metrics: `apache_5xx_streak_max`, `apache_404_burst_max_per_minute`, `apache_5xx_burst_max_per_minute`.
+     - Template/path rarity: `apache_distinct_message_templates`, `apache_rare_error_message_count`, `apache_rare_error_message_ratio`, `apache_distinct_paths`, `apache_rare_path_ratio`.
+     - Time-based: `apache_rare_hour`.
+   - Ensured these new Apache features are wired into the model via `pipeline.py` (`NUMERIC_FEATURES` list).
+
+2. **Apache behavioral tests**
+   - Added `tests/test_behavioral_apache.py` to validate Apache feature behavior on a synthetic session:
+     - Asserts correct 5xx counts and streaks.
+     - Checks error vs notice ratios and error/5xx bursts.
+     - Verifies distinct template count and rare-template metrics.
+     - Confirms rare-hour flag behavior.
+   - Fixed a constructor mismatch (`Session` requiring `user_agent`) so the test uses the real `Session` shape.
+
+3. **Apache CLI for anomaly inspection**
+   - Implemented `aegislog/cli_apache.py` as a log-based CLI:
+     - Accepts an Apache error `.log` file as a positional `log_path`.
+     - Uses `parse_error_file` → `build_sessions` → `score_sessions` (with `resolve_model_path`) to score Apache sessions end-to-end.
+     - Sorts by anomaly score (`ensemble_score` or `anomaly_score`) and prints top N suspicious sessions.
+     - For each session, prints session id, score, error ratio, 5xx burst, and a concise notes summary derived from the Apache features (e.g., “errors dominate over notices”, “many rare error templates”, “activity during unusual hours”).
+   - Confirmed the CLI works on the real LogHub sample:
+     - `python -m aegislog.cli_apache .\data\loghub\Apache.log -n 20`
+     - Output shows top sessions with anomaly scores and human-readable notes.
+
+4. **CLI tests**
+   - Replaced the old CSV-based CLI test with an integration-style log-based smoke test in `tests/test_cli_apache.py`:
+     - Calls `apache_main([ "data/loghub/Apache.log", "--top", "5" ])`.
+     - Asserts exit code 0 and verifies the output includes the header and key fields (`score=`, `notes:`).
+   - Marked the test as `@pytest.mark.integration` and confirmed it passes; only remaining minor follow-up is to register the custom marker in `pytest.ini` to silence the PytestUnknownMarkWarning.
+
+5. **Overall status**
+   - Apache is now complete for this phase:
+     - Parsing from `.log` files.
+     - Session and feature extraction with Apache-specific behavioral metrics.
+     - Anomaly scoring via the shared ML pipeline.
+     - A log-based CLI (`cli_apache`) that surfaces top suspicious Apache sessions with interpretable notes.
+     - Behavioral and CLI tests passing, plus manual validation on the LogHub sample.
