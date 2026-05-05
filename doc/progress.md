@@ -1332,3 +1332,23 @@ Here’s a concise progress log for **Day 1 — Finish SSH**.
 ***
 
 Net result: Day 3 is now grounded with concrete IP/user baseline features, properly wired into the pipeline and covered by tests. The next time you sit down, you’re ready to: (1) re-train models with the richer feature set, and (2) start building a small experiment harness to compare IF / OCSVM / LOF in a more systematic way.
+
+
+Progress Log — 2026-05-05 (Day 4: Incident Evidence Layer)
+Added IncidentEvidence and SessionEvidence dataclasses (aegislog/incident/evidence.py) to represent AI-ready incident context, including per-session evidence and a structured extra field for derived signals.
+
+Implemented build_ssh_incident_evidence(...) in aegislog/incidents.py to turn an Incident plus its timeline into an IncidentEvidence object with SSH-specific highlights (e.g., success-after-failures, high failure volume, max streak, burstiness) and JSON-safe session evidence.
+
+Implemented build_apache_incident_evidence(...) in aegislog/incidents.py to construct IncidentEvidence for Apache error sessions using 5xx counts, rare error templates, rare paths, bursts, and rarity-of-hour metrics.
+
+Refactored SSH explain flow in cli_ssh.py to build IncidentEvidence for the selected incident and include it in --format json output as a new incident_evidence object, while preserving the existing top-level incident, summary, local_explanation, and llm_prompt keys expected by integration tests and existing consumers.
+
+Added focused tests for the evidence builders:
+
+tests/test_incident_evidence_ssh.py verifies that build_ssh_incident_evidence produces correct IDs, highlights, extra fields, and fully JSON-serializable payloads.
+
+tests/test_incident_evidence_apache.py does the same for build_apache_incident_evidence.
+
+Updated tests/test_cli_explain_integration.py to continue asserting the legacy JSON contract while now being satisfied by the refactored explain flow that adds incident_evidence for debugging and downstream tooling.
+
+Ran python -m pytest and confirmed that the entire test suite, including the new incident evidence and explain JSON integration tests, passes successfully.
