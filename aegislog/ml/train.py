@@ -1,6 +1,9 @@
 import argparse
-import joblib
+import json
+from datetime import datetime, timezone
 from pathlib import Path
+
+import joblib
 
 from aegislog.parsing.apache_error import parse_error_file
 from aegislog.parsing.auth_ssh import parse_ssh_file
@@ -13,6 +16,14 @@ from aegislog.ml.pipeline import (
     MODEL_PATH,
     NUMERIC_FEATURES,
 )
+
+FEATURE_VERSION = "v3-baseline-deviation"
+DEFAULT_THRESHOLD_PERCENTILE = 99.0
+
+
+def _metadata_path_for_model(model_path: str) -> Path:
+    model_file = Path(model_path)
+    return model_file.with_suffix(".metadata.json")
 
 
 def main():
@@ -57,9 +68,28 @@ def main():
 
     pipeline.fit(df[NUMERIC_FEATURES])
 
-    Path(args.model_path).parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(pipeline, args.model_path)
-    print(f"Saved model to {args.model_path}")
+    model_path = Path(args.model_path)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(pipeline, model_path)
+
+    metadata = {
+        "log_type": args.log_type,
+        "model_type": args.model_type,
+        "model_path": str(model_path),
+        "logs_path": str(Path(args.logs_path)),
+        "trained_at_utc": datetime.now(timezone.utc).isoformat(),
+        "feature_version": FEATURE_VERSION,
+        "numeric_features": list(NUMERIC_FEATURES),
+        "session_count": int(len(df)),
+        "event_count_total": int(df["event_count"].sum()) if "event_count" in df.columns else None,
+        "threshold_percentile_default": DEFAULT_THRESHOLD_PERCENTILE,
+    }
+
+    metadata_path = _metadata_path_for_model(str(model_path))
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+    print(f"Saved model to {model_path}")
+    print(f"Saved metadata to {metadata_path}")
 
 
 if __name__ == "__main__":
