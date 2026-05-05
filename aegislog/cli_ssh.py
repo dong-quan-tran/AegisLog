@@ -1,13 +1,16 @@
 import argparse
 import json
 
+
 from aegislog.parsing.auth_ssh import parse_ssh_file
 from aegislog.features.sessions import build_sessions
+
 
 from aegislog.ml.pipeline import (
     score_sessions,
     add_threshold_columns,
 )
+
 
 from aegislog.ai import (
     build_incident_llm_prompt,
@@ -15,14 +18,18 @@ from aegislog.ai import (
     local_incident_explanation,
 )
 
+
 from aegislog.incidents import (
     group_sessions_to_incidents,
     summarize_incident,
     build_incident_timeline,
     build_incident_report,
+    build_ssh_incident_evidence,
 )
 
+
 from aegislog.ai_client import call_llm_for_incident, LLMConfigError
+
 
 from aegislog.cli_common import (
     SEVERITY_CHOICES,
@@ -35,6 +42,7 @@ from aegislog.cli_common import (
 )
 
 
+
 SSH_ATTACK_PATTERN_CHOICES = [
     "brute_force",
     "password_spray",
@@ -44,6 +52,7 @@ SSH_ATTACK_PATTERN_CHOICES = [
 ]
 
 
+
 def filter_incidents_by_patterns(
     incidents,
     patterns: list[str] | None = None,
@@ -51,12 +60,14 @@ def filter_incidents_by_patterns(
     if not patterns:
         return incidents
 
+
     allowed = set(patterns)
     return [
         inc
         for inc in incidents
         if getattr(inc, "attack_pattern", None) in allowed
     ]
+
 
 
 def sort_incidents(incidents, sort_by: str = "severity"):
@@ -67,6 +78,7 @@ def sort_incidents(incidents, sort_by: str = "severity"):
             reverse=True,
         )
 
+
     if sort_by == "auth_fail_ratio":
         return sorted(
             incidents,
@@ -74,12 +86,14 @@ def sort_incidents(incidents, sort_by: str = "severity"):
             reverse=True,
         )
 
+
     if sort_by == "total_events":
         return sorted(
             incidents,
             key=lambda inc: (inc.total_events, inc.auth_failed, inc.avg_anomaly_score),
             reverse=True,
         )
+
 
     return sorted(
         incidents,
@@ -92,6 +106,7 @@ def sort_incidents(incidents, sort_by: str = "severity"):
     )
 
 
+
 def filter_incidents_by_thresholds(
     incidents,
     min_severity: str | None = None,
@@ -100,10 +115,12 @@ def filter_incidents_by_thresholds(
     if not min_severity and not min_confidence:
         return incidents
 
+
     def keep(inc):
         if min_severity:
             if SEVERITY_ORDER.get(inc.severity, 0) < SEVERITY_ORDER[min_severity]:
                 return False
+
 
         if min_confidence:
             conf = getattr(inc, "confidence", None)
@@ -112,9 +129,12 @@ def filter_incidents_by_thresholds(
             if CONFIDENCE_ORDER.get(conf, 0) < CONFIDENCE_ORDER[min_confidence]:
                 return False
 
+
         return True
 
+
     return [inc for inc in incidents if keep(inc)]
+
 
 
 def incident_to_dict(inc, summary, explanation, llm_prompt) -> dict:
@@ -151,6 +171,7 @@ def incident_to_dict(inc, summary, explanation, llm_prompt) -> dict:
     }
 
 
+
 def timeline_entry_to_dict(entry) -> dict:
     return {
         "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
@@ -165,6 +186,7 @@ def timeline_entry_to_dict(entry) -> dict:
     }
 
 
+
 def load_ssh_incidents_for_cli(
     args: argparse.Namespace,
     *,
@@ -176,8 +198,10 @@ def load_ssh_incidents_for_cli(
     model_path = resolve_model_path(args)
     df = score_sessions(sessions, model_path=model_path)
 
+
     if df.empty:
         return sessions, df, []
+
 
     sort_col = "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
     df = add_threshold_columns(
@@ -186,17 +210,21 @@ def load_ssh_incidents_for_cli(
         threshold_percentile=getattr(args, "threshold_percentile", 99.0),
     )
 
+
     if anomalous_only:
         df = df[df["is_anomalous"]]
         if df.empty:
             return sessions, df, []
 
+
     if restrict_sessions_to_df:
         allowed_ids = set(df["session_id"].tolist())
         sessions = [s for s in sessions if s.session_id in allowed_ids]
 
+
     incidents = group_sessions_to_incidents(sessions, df)
     return sessions, df, incidents
+
 
 
 def add_ssh_source_args(parser: argparse.ArgumentParser) -> None:
@@ -220,6 +248,7 @@ def add_ssh_source_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+
 def add_incident_filter_args(
     parser: argparse.ArgumentParser,
     *,
@@ -232,6 +261,7 @@ def add_incident_filter_args(
 ) -> None:
     if pattern_choices is None:
         pattern_choices = SSH_ATTACK_PATTERN_CHOICES
+
 
     parser.add_argument(
         "--min-severity",
@@ -252,10 +282,12 @@ def add_incident_filter_args(
     )
 
 
+
 def cmd_explain(args: argparse.Namespace) -> None:
     if args.log_type != "ssh_auth":
         print("Currently, explain is only implemented for ssh_auth logs.")
         return
+
 
     sessions, df, incidents = load_ssh_incidents_for_cli(
         args,
@@ -263,13 +295,16 @@ def cmd_explain(args: argparse.Namespace) -> None:
         restrict_sessions_to_df=True,
     )
 
+
     if df.empty:
         print("No sessions found.")
         return
 
+
     if not incidents:
         print("No incidents found.")
         return
+
 
     incidents = filter_incidents_by_thresholds(
         incidents,
@@ -277,14 +312,17 @@ def cmd_explain(args: argparse.Namespace) -> None:
         min_confidence=getattr(args, "min_confidence", None),
     )
 
+
     incidents = filter_incidents_by_patterns(
         incidents,
         patterns=getattr(args, "patterns", None),
     )
 
+
     if not incidents:
         print("No incidents matched the specified severity/confidence/pattern filters.")
         return
+
 
     if getattr(args, "first", False):
         inc = incidents[0]
@@ -299,6 +337,10 @@ def cmd_explain(args: argparse.Namespace) -> None:
         inc = incidents[args.index]
         index = args.index
 
+
+    timeline = build_incident_timeline(inc, sessions, df)
+
+
     print(f"Explaining incident at index {index}: {inc.incident_id}")
     print(
         f"  ip={inc.ip} severity={inc.severity} "
@@ -312,34 +354,63 @@ def cmd_explain(args: argparse.Namespace) -> None:
         f"avg_anomaly_score={inc.avg_anomaly_score:.3f}"
     )
 
+
     if getattr(inc, "severity_reason", None):
         print(f"  severity_reason={inc.severity_reason}")
+
 
     if getattr(inc, "confidence_reason", None):
         print(f"  confidence_reason={inc.confidence_reason}")
 
+
     if getattr(inc, "priority_reason", None):
         print(f"  priority_reason={inc.priority_reason}")
+
 
     if getattr(inc, "attack_pattern_reason", None):
         print(f"  attack_pattern_reason={inc.attack_pattern_reason}")
 
+
     summary = summarize_incident(inc)
     print(f"  summary_title={summary.title}")
     print(f"  summary_description={summary.description}")
+
 
     explanation = local_incident_explanation(inc, summary)
     print("  local_explanation_begin")
     print(f"    {explanation}")
     print("  local_explanation_end")
 
+
     llm_prompt = build_incident_llm_prompt(inc, summary)
 
+
+    evidence = build_ssh_incident_evidence(
+        inc,
+        timeline,
+        log_type=args.log_type,
+        model_type=getattr(args, "model_type", "iforest"),
+        threshold_percentile=getattr(args, "threshold_percentile", 99.0),
+    )
+
+
     if getattr(args, "format", "text") == "json":
-        payload = incident_to_dict(inc, summary, explanation, llm_prompt)
+        # Backwards-compatible shape expected by tests and existing consumers
+        legacy = incident_to_dict(inc, summary, explanation, llm_prompt)
+
+        # New evidence object lives alongside the legacy fields
+        payload = {
+            "incident": legacy["incident"],
+            "summary": legacy["summary"],
+            "local_explanation": legacy["local_explanation"],
+            "llm_prompt": legacy["llm_prompt"],
+            "incident_evidence": evidence.to_dict(),
+        }
+
         data = json.dumps(payload, indent=2)
         write_output(data, getattr(args, "output", None))
         return
+
 
     if getattr(args, "use_llm", False):
         try:
@@ -358,10 +429,12 @@ def cmd_explain(args: argparse.Namespace) -> None:
         print("  llm_prompt_end")
 
 
+
 def cmd_incidents(args: argparse.Namespace) -> None:
     if args.log_type != "ssh_auth":
         print("Currently, incidents are only implemented for ssh_auth logs.")
         return
+
 
     sessions, df, incidents = load_ssh_incidents_for_cli(
         args,
@@ -369,13 +442,16 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         restrict_sessions_to_df=True,
     )
 
+
     if df.empty:
         print("No sessions found.")
         return
 
+
     if not incidents:
         print("No incidents found.")
         return
+
 
     incidents = filter_incidents_by_thresholds(
         incidents,
@@ -383,21 +459,26 @@ def cmd_incidents(args: argparse.Namespace) -> None:
         min_confidence=getattr(args, "min_confidence", None),
     )
 
+
     incidents = filter_incidents_by_patterns(
         incidents,
         patterns=getattr(args, "patterns", None),
     )
 
+
     if not incidents:
         print("No incidents found after applying severity/confidence/pattern filters.")
         return
+
 
     incidents = sort_incidents(
         incidents,
         sort_by=getattr(args, "sort_by", "severity"),
     )
 
+
     top = incidents[: args.top]
+
 
     if getattr(args, "format", "text") == "json":
         payload = []
@@ -407,9 +488,11 @@ def cmd_incidents(args: argparse.Namespace) -> None:
             llm_prompt = build_incident_llm_prompt(inc, summary)
             payload.append(incident_to_dict(inc, summary, explanation, llm_prompt))
 
+
         data = json.dumps(payload, indent=2)
         write_output(data, getattr(args, "output", None))
         return
+
 
     print(f"Top {len(top)} IP-based incidents (sorted by {args.sort_by}):")
     for inc in top:
@@ -419,6 +502,7 @@ def cmd_incidents(args: argparse.Namespace) -> None:
             )
         else:
             time_window = "unknown"
+
 
         print(
             f"- incident_id={inc.incident_id} ip={inc.ip} "
@@ -433,30 +517,39 @@ def cmd_incidents(args: argparse.Namespace) -> None:
             f"avg_anomaly_score={inc.avg_anomaly_score:.3f}"
         )
 
+
         if getattr(inc, "severity_reason", None):
             print(f"  severity_reason={inc.severity_reason}")
+
 
         if getattr(inc, "confidence", None):
             print(f"  confidence={inc.confidence}")
 
+
         if getattr(inc, "confidence_reason", None):
             print(f"  confidence_reason={inc.confidence_reason}")
+
 
         if getattr(inc, "primary_user", None):
             print(f"  primary_user={inc.primary_user}")
 
+
         if getattr(inc, "targeted_users", None):
             print(f"  targeted_users={','.join(inc.targeted_users)}")
+
 
         if getattr(inc, "priority_reason", None):
             print(f"  priority_reason={inc.priority_reason}")
 
+
         if getattr(inc, "attack_pattern_reason", None):
             print(f"  attack_pattern_reason={inc.attack_pattern_reason}")
+
 
         summary = summarize_incident(inc)
         print(f"  summary_title={summary.title}")
         print(f"  summary_description={summary.description}")
+
 
         if getattr(args, "show_timeline", False):
             timeline = build_incident_timeline(inc, sessions, df)
@@ -476,11 +569,13 @@ def cmd_incidents(args: argparse.Namespace) -> None:
                 )
             print("  timeline_end")
 
+
         if getattr(args, "show_local_explanation", False):
             explanation = local_incident_explanation(inc, summary)
             print("  local_explanation_begin")
             print(f"    {explanation}")
             print("  local_explanation_end")
+
 
         if getattr(args, "print_llm_prompt", False):
             llm_prompt = build_incident_llm_prompt(inc, summary)
@@ -491,10 +586,12 @@ def cmd_incidents(args: argparse.Namespace) -> None:
             print("  llm_prompt_end")
 
 
+
 def cmd_report(args: argparse.Namespace) -> None:
     if args.log_type != "ssh_auth":
         print("Currently, report is only implemented for ssh_auth logs.")
         return
+
 
     sessions, df, incidents = load_ssh_incidents_for_cli(
         args,
@@ -502,18 +599,23 @@ def cmd_report(args: argparse.Namespace) -> None:
         restrict_sessions_to_df=True,
     )
 
+
     total_sessions = len(sessions)
+
 
     if df.empty:
         print("No sessions found.")
         return
 
+
     anomalous_df = df[df["is_anomalous"]]
     anomalous_sessions = len(anomalous_df)
+
 
     if anomalous_sessions == 0 and getattr(args, "alerts_only", False):
         print("No anomalous sessions found; no incidents to report.")
         return
+
 
     incidents = filter_incidents_by_thresholds(
         incidents,
@@ -521,10 +623,12 @@ def cmd_report(args: argparse.Namespace) -> None:
         min_confidence=getattr(args, "min_confidence", None),
     )
 
+
     incidents = filter_incidents_by_patterns(
         incidents,
         patterns=getattr(args, "patterns", None),
     )
+
 
     if not incidents:
         if getattr(args, "format", "text") == "json":
@@ -538,8 +642,10 @@ def cmd_report(args: argparse.Namespace) -> None:
             write_output(data, getattr(args, "output", None))
             return
 
+
         print("No incidents matched the specified severity/confidence/pattern filters.")
         return
+
 
     report = build_incident_report(
         incidents,
@@ -548,10 +654,12 @@ def cmd_report(args: argparse.Namespace) -> None:
         top_n=args.top,
     )
 
+
     if getattr(args, "format", "text") == "json":
         data = json.dumps(report, indent=2)
         write_output(data, getattr(args, "output", None))
         return
+
 
     print("Incident report:")
     print(f"  total_sessions={report.get('total_sessions', 0)}")
@@ -564,6 +672,7 @@ def cmd_report(args: argparse.Namespace) -> None:
     print(f"  severity_counts={report['severity_counts']}")
     print(f"  confidence_counts={report['confidence_counts']}")
 
+
     if report["top_incident_ips"]:
         print("  top_incident_ips:")
         for item in report["top_incident_ips"]:
@@ -571,12 +680,15 @@ def cmd_report(args: argparse.Namespace) -> None:
                 f"    ip={item['ip']} incident_count={item['incident_count']}"
             )
 
+
     if report["top_targeted_users"]:
         print("  top_targeted_users:")
         for item in report["top_targeted_users"]:
             print(
                 f"    user={item['user']} incident_count={item['incident_count']}"
             )
+
+
 
 def register_incidents_parser(subparsers) -> None:
     p_incidents = subparsers.add_parser(
@@ -634,6 +746,7 @@ def register_incidents_parser(subparsers) -> None:
     p_incidents.set_defaults(func=cmd_incidents)
 
 
+
 def register_explain_parser(subparsers) -> None:
     p_explain = subparsers.add_parser(
         "explain", help="Explain a single SSH incident with AI-style output."
@@ -689,6 +802,7 @@ def register_explain_parser(subparsers) -> None:
         ),
     )
     p_explain.set_defaults(func=cmd_explain)
+
 
 
 def register_report_parser(subparsers) -> None:
