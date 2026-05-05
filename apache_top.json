@@ -1,0 +1,62 @@
+[
+  {
+    "session_id": "||||2005-07-21T03:37:11",
+    "score": 0.1606133988315972,
+    "error_ratio": 0.0,
+    "apache_error_vs_notice_ratio": 1.0,
+    "apache_error_burst_max_per_minute": 1130,
+    "apache_5xx_burst_max_per_minute": 0,
+    "apache_rare_error_message_ratio": 0.0,
+    "apache_high_severity_ratio": 0.0,
+    "apache_rare_hour": 1,
+    "apache_notes": "error spike within a single minute; activity during unusual hours"
+  },
+  {
+    "session_id": "||||2005-11-20T21:35:46",
+    "score": 0.1539030662090407,
+    "error_ratio": 0.0,
+    "apache_error_vs_notice_ratio": 0.0,
+    "apache_error_burst_max_per_minute": 0,
+    "apache_5xx_burst_max_per_minute": 0,
+    "apache_rare_error_message_ratio": 0.0,
+    "apache_high_severity_ratio": 0.0,
+    "apache_rare_hour": 1,
+    "apache_notes": "activity during unusual hours"
+  },
+  {
+    "session_id": "||||2006-02-16T00:51:15",
+    "score": 0.15013498220759058,
+    "error_ratio": 0.0,
+    "apache_error_vs_notice_ratio": 1.0,
+    "apache_error_burst_max_per_minute": 288,
+    "apache_5xx_burst_max_per_minute": 0,
+    "apache_rare_error_message_ratio": 0.0,
+    "apache_high_severity_ratio": 0.0,
+    "apache_rare_hour": 1,
+    "apache_notes": "error spike within a single minute; activity during unusual hours"
+  },
+  {
+    "session_id": "||||2006-01-25T01:20:01",
+    "score": 0.146092852260452,
+    "error_ratio": 0.0,
+    "apache_error_vs_notice_ratio": 1.0,
+    "apache_error_burst_max_per_minute": 255,
+    "apache_5xx_burst_max_per_minute": 0,
+    "apache_rare_error_message_ratio": 0.0,
+    "apache_high_severity_ratio": 0.0,
+    "apache_rare_hour": 1,
+    "apache_notes": "error spike within a single minute; activity during unusual hours"
+  },
+  {
+    "session_id": "||||2005-11-29T01:58:45",
+    "score": 0.14553555268183915,
+    "error_ratio": 0.0,
+    "apache_error_vs_notice_ratio": 1.0,
+    "apache_error_burst_max_per_minute": 284,
+    "apache_5xx_burst_max_per_minute": 0,
+    "apache_rare_error_message_ratio": 0.0,
+    "apache_high_severity_ratio": 0.0,
+    "apache_rare_hour": 0,
+    "apache_notes": "error spike within a single minute"
+  }
+]

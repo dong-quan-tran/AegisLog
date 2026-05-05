@@ -1,0 +1,54 @@
+{
+  "incident_id": "apache:||||2005-07-21T03:37:11",
+  "log_type": "apache_error",
+  "ip": null,
+  "user": null,
+  "model_type": "iforest",
+  "feature_version": "iforest-v2",
+  "threshold_percentile": 99.0,
+  "severity": "medium",
+  "confidence": "medium",
+  "priority": "medium",
+  "attack_pattern": "apache_anomalous_session",
+  "highlights": [
+    "Apache error events were bursty, peaking at 1130 per minute.",
+    "The session occurred during an unusual hour for Apache activity."
+  ],
+  "sessions": [
+    {
+      "session_id": "||||2005-07-21T03:37:11",
+      "anomaly_score": 0.1606133988315972,
+      "start_time": "2005-07-21T03:37:11",
+      "end_time": "2005-07-21T03:46:31",
+      "ip": null,
+      "user": null,
+      "auth_failed": 0,
+      "auth_success": 0,
+      "event_count": 1131,
+      "event_type": "apache_session",
+      "notes": [
+        "1131 error-level Apache events",
+        "activity occurred during a rare hour"
+      ]
+    }
+  ],
+  "extra": {
+    "status_5xx": 0,
+    "error_events": 1131,
+    "notice_events": 0,
+    "apache_5xx_streak_max": 0,
+    "apache_404_burst_max_per_minute": 0,
+    "apache_5xx_burst_max_per_minute": 0,
+    "apache_error_burst_max_per_minute": 1130,
+    "apache_distinct_paths": 0,
+    "apache_rare_path_ratio": 0.0,
+    "apache_distinct_message_templates": 0,
+    "apache_rare_error_message_count": 0,
+    "apache_rare_error_message_ratio": 0.0,
+    "apache_rare_hour": 1,
+    "apache_error_vs_notice_ratio": 1.0,
+    "apache_high_severity_events": 0,
+    "apache_high_severity_ratio": 0.0,
+    "avg_anomaly_score": 0.1606133988315972
+  }
+}

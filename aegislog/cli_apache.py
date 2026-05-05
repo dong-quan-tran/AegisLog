@@ -1,11 +1,14 @@
 import argparse
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, asdict
 from typing import List
 
 from aegislog.parsing.apache_error import parse_error_file
 from aegislog.features.sessions import build_sessions
 from aegislog.ml.pipeline import score_sessions
-from aegislog.cli_common import resolve_model_path
+from aegislog.cli_common import resolve_model_path, add_json_output_args, write_output
+from aegislog.incidents import build_apache_incident_evidence
+from aegislog.features.sessions import Session
 
 
 @dataclass
@@ -72,6 +75,107 @@ def summarize_apache_row(row) -> ApacheSessionSummary:
     )
 
 
+def _ensure_required_columns(df):
+    required_cols = [
+        "session_id",
+        "error_ratio",
+        "apache_error_vs_notice_ratio",
+        "apache_error_burst_max_per_minute",
+        "apache_5xx_burst_max_per_minute",
+        "apache_rare_error_message_ratio",
+        "apache_high_severity_ratio",
+        "apache_rare_hour",
+    ]
+    missing = [c for c in required_cols if c not in df.columns]
+    return missing
+
+
+def _sorted_apache_df(df, top: int):
+    score_col = "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
+    return df.sort_values(score_col, ascending=False).head(top)
+
+
+def _find_session_by_id(sessions: List[Session], session_id: str) -> Session | None:
+    for s in sessions:
+        if s.session_id == session_id:
+            return s
+    return None
+
+
+def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
+    if df.empty:
+        print("No sessions found.")
+        return 0
+
+    missing = _ensure_required_columns(df)
+    if missing:
+        print(f"scored data missing required columns: {', '.join(missing)}")
+        return 1
+
+    # Sort sessions and pick target
+    df_sorted = _sorted_apache_df(df, top=max(args.top, 1))
+
+    if df_sorted.empty:
+        print("No sessions found.")
+        return 0
+
+    if getattr(args, "first", False):
+        index = 0
+    else:
+        index = getattr(args, "index", 0)
+        if index < 0 or index >= len(df_sorted):
+            print(f"Invalid index {index}. There are {len(df_sorted)} session(s).")
+            return 1
+
+    row = df_sorted.iloc[index]
+    session_id = row["session_id"]
+    session = _find_session_by_id(sessions, session_id)
+    if session is None:
+        print(f"Session {session_id} not found in built sessions.")
+        return 1
+
+    print(f"Explaining Apache session at index {index}: session_id={session_id}")
+
+    summary = summarize_apache_row(row)
+    print(
+        f"  score={summary.score:.3f} "
+        f"errors={summary.error_ratio:.2f} "
+        f"5xx_burst={summary.apache_5xx_burst_max_per_minute} "
+        f"notes={summary.apache_notes}"
+    )
+
+    evidence = build_apache_incident_evidence(
+        session,
+        row,
+        model_type=args.model_type,
+        threshold_percentile=getattr(args, "threshold_percentile", 99.0),
+    )
+
+    # Text vs JSON output
+    if getattr(args, "format", "text") == "json":
+        payload = evidence.to_dict()
+        data = json.dumps(payload, indent=2)
+        write_output(data, getattr(args, "output", None))
+        return 0
+
+    # Text-mode explanation based on evidence highlights and extra
+    print("  highlights:")
+    for h in evidence.highlights:
+        print(f"    - {h}")
+
+    extra = evidence.extra
+    print(
+        "  metrics: "
+        f"status_5xx={extra.get('status_5xx', 0)} "
+        f"error_events={extra.get('error_events', 0)} "
+        f"rare_error_templates={extra.get('apache_rare_error_message_count', 0)} "
+        f"rare_error_ratio={extra.get('apache_rare_error_message_ratio', 0.0):.2f} "
+        f"rare_path_ratio={extra.get('apache_rare_path_ratio', 0.0):.2f}"
+    )
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="aegislog-apache",
@@ -103,8 +207,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--top",
         type=int,
         default=20,
-        help="Number of top suspicious sessions to show (default: 20).",
+        help="Number of top suspicious sessions to show or consider (default: 20).",
     )
+    parser.add_argument(
+        "--threshold-percentile",
+        type=float,
+        default=99.0,
+        help="Percentile threshold used when building Apache evidence (default: 99.0).",
+    )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Explain a single suspicious Apache session with evidence-style output.",
+    )
+    parser.add_argument(
+        "--index",
+        type=int,
+        default=0,
+        help="Zero-based index into the sorted list of sessions to explain (used with --explain).",
+    )
+    parser.add_argument(
+        "--first",
+        action="store_true",
+        help="Explain the first session after sorting (used with --explain).",
+    )
+    add_json_output_args(parser, "Apache sessions or explanation")
     return parser
 
 
@@ -114,30 +241,33 @@ def main(argv: List[str] | None = None) -> int:
 
     sessions, df = load_apache_sessions_for_cli(args)
 
+    if args.explain:
+        return _explain_apache_session(args, sessions, df)
+
+    # Default behavior: list top suspicious sessions (text or JSON)
     if df.empty:
         print("No sessions found.")
         return 0
 
-    required_cols = [
-        "session_id",
-        "error_ratio",
-        "apache_error_vs_notice_ratio",
-        "apache_error_burst_max_per_minute",
-        "apache_5xx_burst_max_per_minute",
-        "apache_rare_error_message_ratio",
-        "apache_high_severity_ratio",
-        "apache_rare_hour",
-    ]
-    missing = [c for c in required_cols if c not in df.columns]
+    missing = _ensure_required_columns(df)
     if missing:
         print(f"scored data missing required columns: {', '.join(missing)}")
         return 1
 
-    score_col = "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
-    df_sorted = df.sort_values(score_col, ascending=False).head(args.top)
+    df_sorted = _sorted_apache_df(df, top=args.top)
 
     if df_sorted.empty:
         print("No sessions found.")
+        return 0
+
+    if getattr(args, "format", "text") == "json":
+        payload = []
+        for _, row in df_sorted.iterrows():
+            summary = summarize_apache_row(row)
+            payload.append(asdict(summary))
+
+        data = json.dumps(payload, indent=2)
+        write_output(data, getattr(args, "output", None))
         return 0
 
     print(f"Top {len(df_sorted)} suspicious Apache sessions:\n")
