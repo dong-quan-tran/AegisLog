@@ -1,11 +1,14 @@
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Iterable
 
 import pandas as pd
 
 from aegislog.features.sessions import Session
+
+from aegislog.ml.pipeline import get_model_version
+
 
 
 @dataclass
@@ -706,3 +709,203 @@ def build_incident_report(
             report["anomalous_session_percent"] = 0.0
 
     return report
+
+def build_ssh_incident_evidence(
+    incident: Incident,
+    timeline: Iterable[IncidentTimelineEntry],
+    log_type: str = "ssh_auth",
+    model_type: str = "iforest",
+    threshold_percentile: float = 99.0,
+) -> "IncidentEvidence":
+    """
+    Build an IncidentEvidence object for an SSH incident, using the existing
+    Incident and IncidentTimelineEntry structures.
+    """
+    from aegislog.incident.evidence import IncidentEvidence, SessionEvidence  # local import to avoid cycles
+
+    session_evidence: List[SessionEvidence] = []
+
+    for entry in timeline:
+        notes: List[str] = []
+
+        if entry.auth_failed > 0 and entry.auth_success == 0:
+            notes.append("only failed SSH authentications in this session")
+        if entry.auth_success > 0 and entry.auth_failed > 0:
+            notes.append("failed authentications followed by success in this session")
+        if entry.event_count >= 100:
+            notes.append("high event volume in this session")
+
+        session_evidence.append(
+            SessionEvidence(
+                session_id=entry.session_id,
+                anomaly_score=entry.anomaly_score,
+                start_time=entry.timestamp.isoformat() if entry.timestamp else None,
+                end_time=None,  # can be filled later if needed
+                ip=entry.ip,
+                user=entry.user,
+                auth_failed=entry.auth_failed,
+                auth_success=entry.auth_success,
+                event_count=entry.event_count,
+                event_type=entry.event_type,
+                notes=notes,
+            )
+        )
+
+    highlights: List[str] = []
+
+    if incident.has_success_after_failures:
+        highlights.append(
+            "Failed SSH authentications were followed by successful login(s) from the same IP."
+        )
+    if incident.auth_failed >= 100 and incident.auth_fail_ratio >= 0.9:
+        highlights.append(
+            f"High volume of failed SSH authentications ({incident.auth_failed}) with a "
+            f"failure ratio of {incident.auth_fail_ratio:.2f}, consistent with brute-force behavior."
+        )
+    if incident.auth_failed_streak_max >= 50:
+        highlights.append(
+            f"Maximum consecutive failed attempts reached {incident.auth_failed_streak_max}."
+        )
+    if incident.auth_burst_max_per_minute >= 1000:
+        highlights.append(
+            f"Peak SSH event rate reached {incident.auth_burst_max_per_minute} events per minute."
+        )
+    if not highlights:
+        highlights.append("SSH authentication behavior is anomalous but does not match a more specific pattern.")
+
+    extra: Dict[str, Any] = {
+        "severity_reason": incident.severity_reason,
+        "confidence_reason": incident.confidence_reason,
+        "priority_reason": incident.priority_reason,
+        "attack_pattern_reason": incident.attack_pattern_reason,
+        "auth_failed": incident.auth_failed,
+        "auth_success": incident.auth_success,
+        "auth_fail_ratio": incident.auth_fail_ratio,
+        "total_events": incident.total_events,
+        "avg_anomaly_score": incident.avg_anomaly_score,
+        "session_count": len(incident.session_ids),
+        "first_seen": incident.first_seen.isoformat() if incident.first_seen else None,
+        "last_seen": incident.last_seen.isoformat() if incident.last_seen else None,
+    }
+
+    evidence = IncidentEvidence(
+        incident_id=incident.incident_id,
+        log_type=log_type,
+        ip=incident.ip,
+        user=incident.primary_user,
+        model_type=model_type,
+        feature_version=get_model_version(),
+        threshold_percentile=threshold_percentile,
+        severity=incident.severity,
+        confidence=incident.confidence,
+        priority=incident.priority,
+        attack_pattern=incident.attack_pattern,
+        highlights=highlights,
+        sessions=session_evidence,
+        extra=extra,
+    )
+    return evidence
+
+def build_apache_incident_evidence(
+    session: Session,
+    session_row: pd.Series,
+    *,
+    model_type: str = "iforest",
+    threshold_percentile: float = 99.0,
+) -> "IncidentEvidence":
+    from aegislog.incident.evidence import IncidentEvidence, SessionEvidence
+    from aegislog.ml.pipeline import get_model_version
+
+    notes: List[str] = []
+    highlights: List[str] = []
+
+    status_5xx = int(session_row.get("status_5xx", 0))
+    error_events = int(session_row.get("error_events", 0))
+    rare_ratio = float(session_row.get("apache_rare_error_message_ratio", 0.0))
+    rare_count = int(session_row.get("apache_rare_error_message_count", 0))
+    path_ratio = float(session_row.get("apache_rare_path_ratio", 0.0))
+    burst_5xx = int(session_row.get("apache_5xx_burst_max_per_minute", 0))
+    burst_error = int(session_row.get("apache_error_burst_max_per_minute", 0))
+    rare_hour = int(session_row.get("apache_rare_hour", 0))
+    anomaly_score = float(session_row.get("anomaly_score", 0.0))
+
+    if status_5xx > 0:
+        notes.append(f"{status_5xx} server-error events in this session")
+    if error_events > 0:
+        notes.append(f"{error_events} error-level Apache events")
+    if rare_count > 0:
+        notes.append(f"{rare_count} rare error message template(s)")
+    if rare_hour:
+        notes.append("activity occurred during a rare hour")
+
+    if burst_5xx >= 5:
+        highlights.append(
+            f"5xx responses were bursty, peaking at {burst_5xx} per minute."
+        )
+    if burst_error >= 5:
+        highlights.append(
+            f"Apache error events were bursty, peaking at {burst_error} per minute."
+        )
+    if rare_ratio > 0:
+        highlights.append(
+            f"Rare error templates accounted for {rare_ratio:.2f} of observed Apache error messages."
+        )
+    if path_ratio > 0:
+        highlights.append(
+            f"Rare paths accounted for {path_ratio:.2f} of distinct path activity."
+        )
+    if rare_hour:
+        highlights.append("The session occurred during an unusual hour for Apache activity.")
+    if not highlights:
+        highlights.append("Apache behavior was anomalous but without a single dominant indicator.")
+
+    session_ev = SessionEvidence(
+        session_id=session.session_id,
+        anomaly_score=anomaly_score,
+        start_time=session.start_time.isoformat() if session.start_time else None,
+        end_time=session.end_time.isoformat() if session.end_time else None,
+        ip=session.ip,
+        user=session.user,
+        auth_failed=0,
+        auth_success=0,
+        event_count=int(session_row.get("event_count", 0)),
+        event_type="apache_session",
+        notes=notes,
+    )
+
+    extra = {
+        "status_5xx": status_5xx,
+        "error_events": error_events,
+        "notice_events": int(session_row.get("notice_events", 0)),
+        "apache_5xx_streak_max": int(session_row.get("apache_5xx_streak_max", 0)),
+        "apache_404_burst_max_per_minute": int(session_row.get("apache_404_burst_max_per_minute", 0)),
+        "apache_5xx_burst_max_per_minute": burst_5xx,
+        "apache_error_burst_max_per_minute": burst_error,
+        "apache_distinct_paths": int(session_row.get("apache_distinct_paths", 0)),
+        "apache_rare_path_ratio": path_ratio,
+        "apache_distinct_message_templates": int(session_row.get("apache_distinct_message_templates", 0)),
+        "apache_rare_error_message_count": rare_count,
+        "apache_rare_error_message_ratio": rare_ratio,
+        "apache_rare_hour": rare_hour,
+        "apache_error_vs_notice_ratio": float(session_row.get("apache_error_vs_notice_ratio", 0.0)),
+        "apache_high_severity_events": int(session_row.get("apache_high_severity_events", 0)),
+        "apache_high_severity_ratio": float(session_row.get("apache_high_severity_ratio", 0.0)),
+        "avg_anomaly_score": anomaly_score,
+    }
+
+    return IncidentEvidence(
+        incident_id=f"apache:{session.session_id}",
+        log_type="apache_error",
+        ip=session.ip,
+        user=session.user,
+        model_type=model_type,
+        feature_version=get_model_version(),
+        threshold_percentile=threshold_percentile,
+        severity="medium" if anomaly_score >= 0.15 else "low",
+        confidence="medium" if (status_5xx > 0 or rare_count > 0 or burst_error > 0) else "low",
+        priority="medium" if anomaly_score >= 0.15 else "low",
+        attack_pattern="apache_anomalous_session",
+        highlights=highlights,
+        sessions=[session_ev],
+        extra=extra,
+    )
