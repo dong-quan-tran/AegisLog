@@ -85,6 +85,7 @@ def _ensure_required_columns(df):
         "apache_rare_error_message_ratio",
         "apache_high_severity_ratio",
         "apache_rare_hour",
+        "error_events",
     ]
     missing = [c for c in required_cols if c not in df.columns]
     return missing
@@ -102,6 +103,40 @@ def _find_session_by_id(sessions: List[Session], session_id: str) -> Session | N
     return None
 
 
+def _build_apache_report_payload(df_sorted) -> dict:
+    score_col = "ensemble_score" if "ensemble_score" in df_sorted.columns else "anomaly_score"
+
+    top_session_ids = df_sorted.sort_values(score_col, ascending=False)["session_id"].head(5).tolist()
+
+    payload = {
+        "total_sessions_considered": int(len(df_sorted)),
+        "rare_hour_sessions": int((df_sorted["apache_rare_hour"] > 0).sum()),
+        "sessions_with_5xx_burst": int((df_sorted["apache_5xx_burst_max_per_minute"] >= 5).sum()),
+        "sessions_with_error_burst": int((df_sorted["apache_error_burst_max_per_minute"] >= 10).sum()),
+        "sessions_with_rare_templates": int((df_sorted["apache_rare_error_message_ratio"] > 0.3).sum()),
+        "sessions_with_high_severity_ratio": int((df_sorted["apache_high_severity_ratio"] > 0.1).sum()),
+        "sessions_with_error_dominance": int((df_sorted["apache_error_vs_notice_ratio"] > 2.0).sum()),
+        "total_error_events": int(df_sorted["error_events"].fillna(0).sum()),
+        "top_session_ids": top_session_ids,
+    }
+    return payload
+
+
+def _print_apache_report(payload: dict) -> None:
+    print("Apache anomaly report:\n")
+    print(f"  total_sessions_considered={payload['total_sessions_considered']}")
+    print(f"  rare_hour_sessions={payload['rare_hour_sessions']}")
+    print(f"  sessions_with_5xx_burst={payload['sessions_with_5xx_burst']}")
+    print(f"  sessions_with_error_burst={payload['sessions_with_error_burst']}")
+    print(f"  sessions_with_rare_templates={payload['sessions_with_rare_templates']}")
+    print(f"  sessions_with_high_severity_ratio={payload['sessions_with_high_severity_ratio']}")
+    print(f"  sessions_with_error_dominance={payload['sessions_with_error_dominance']}")
+    print(f"  total_error_events={payload['total_error_events']}")
+    print("  top_session_ids:")
+    for session_id in payload["top_session_ids"]:
+        print(f"    - {session_id}")
+
+
 def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
     if df.empty:
         print("No sessions found.")
@@ -112,7 +147,6 @@ def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
         print(f"scored data missing required columns: {', '.join(missing)}")
         return 1
 
-    # Sort sessions and pick target
     df_sorted = _sorted_apache_df(df, top=max(args.top, 1))
 
     if df_sorted.empty:
@@ -151,14 +185,12 @@ def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
         threshold_percentile=getattr(args, "threshold_percentile", 99.0),
     )
 
-    # Text vs JSON output
     if getattr(args, "format", "text") == "json":
         payload = evidence.to_dict()
         data = json.dumps(payload, indent=2)
         write_output(data, getattr(args, "output", None))
         return 0
 
-    # Text-mode explanation based on evidence highlights and extra
     print("  highlights:")
     for h in evidence.highlights:
         print(f"    - {h}")
@@ -173,6 +205,33 @@ def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
         f"rare_path_ratio={extra.get('apache_rare_path_ratio', 0.0):.2f}"
     )
 
+    return 0
+
+
+def _report_apache_sessions(args: argparse.Namespace, df) -> int:
+    if df.empty:
+        print("No sessions found.")
+        return 0
+
+    missing = _ensure_required_columns(df)
+    if missing:
+        print(f"scored data missing required columns: {', '.join(missing)}")
+        return 1
+
+    df_sorted = _sorted_apache_df(df, top=args.top)
+
+    if df_sorted.empty:
+        print("No sessions found.")
+        return 0
+
+    payload = _build_apache_report_payload(df_sorted)
+
+    if getattr(args, "format", "text") == "json":
+        data = json.dumps(payload, indent=2)
+        write_output(data, getattr(args, "output", None))
+        return 0
+
+    _print_apache_report(payload)
     return 0
 
 
@@ -221,6 +280,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explain a single suspicious Apache session with evidence-style output.",
     )
     parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Show an aggregate report over the top suspicious Apache sessions.",
+    )
+    parser.add_argument(
         "--index",
         type=int,
         default=0,
@@ -231,7 +295,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Explain the first session after sorting (used with --explain).",
     )
-    add_json_output_args(parser, "Apache sessions or explanation")
+    add_json_output_args(parser, "Apache sessions, explanation, or report")
     return parser
 
 
@@ -241,10 +305,16 @@ def main(argv: List[str] | None = None) -> int:
 
     sessions, df = load_apache_sessions_for_cli(args)
 
+    if args.explain and args.report:
+        print("Choose only one of --explain or --report.")
+        return 1
+
     if args.explain:
         return _explain_apache_session(args, sessions, df)
 
-    # Default behavior: list top suspicious sessions (text or JSON)
+    if args.report:
+        return _report_apache_sessions(args, df)
+
     if df.empty:
         print("No sessions found.")
         return 0
