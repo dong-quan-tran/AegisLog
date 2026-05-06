@@ -1,0 +1,17 @@
+{
+  "total_sessions_considered": 20,
+  "rare_hour_sessions": 14,
+  "sessions_with_5xx_burst": 0,
+  "sessions_with_error_burst": 15,
+  "sessions_with_rare_templates": 0,
+  "sessions_with_high_severity_ratio": 0,
+  "sessions_with_error_dominance": 0,
+  "total_error_events": 6563,
+  "top_session_ids": [
+    "||||2005-07-21T03:37:11",
+    "||||2005-11-20T21:35:46",
+    "||||2006-02-16T00:51:15",
+    "||||2006-01-25T01:20:01",
+    "||||2005-11-29T01:58:45"
+  ]
+}
