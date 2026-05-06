@@ -1,5 +1,6 @@
 # AegisLog CLI Usage Cheatsheet
 
+
 ## Quick start
 
 From the project root (with your virtualenv activated):
@@ -14,12 +15,15 @@ python -m aegislog.cli incidents data/loghub/SSH.log --log-type ssh_auth --min-s
 # 3) Explain the highest-severity SSH incident
 python -m aegislog.cli explain data/loghub/SSH.log --log-type ssh_auth --min-severity high --first
 
-# 4) See the top suspicious Apache error sessions (using Apache model defaults)
+# 4) See the top suspicious Apache error sessions via main CLI
 python -m aegislog.cli analyze data/loghub/Apache.log --log-type apache_error --top 10
 
-# 5) Use the dedicated Apache CLI to inspect suspicious sessions
+# 5) Use the dedicated Apache CLI to inspect sessions, explain one, and see a report
 python -m aegislog.cli_apache data/loghub/Apache.log -n 20
+python -m aegislog.cli_apache data/loghub/Apache.log --explain --first
+python -m aegislog.cli_apache data/loghub/Apache.log --report
 ```
+
 
 ---
 
@@ -44,6 +48,7 @@ Additional Apache-specific CLI:
 
 - `cli_apache` (run via `python -m aegislog.cli_apache`)
 
+
 ---
 
 ## init
@@ -53,6 +58,7 @@ Initialize experiment database (currently a placeholder).
 ```bash
 python -m aegislog.cli init
 ```
+
 
 ---
 
@@ -83,6 +89,7 @@ Key options:
 - `--model-path` (optional): Where to save the trained model.  
   Default: `models/log_anomaly_iforest.joblib` (or a log-type-specific default).
 - `--model-type`: `iforest` (default), `ocsvm`, `lof`.
+
 
 ---
 
@@ -126,6 +133,7 @@ Common options:
 - `--profile`: Shortcut:
   - `apache` → `--log-type apache_error` + Apache model default.
   - `ssh` → `--log-type ssh_auth` + SSH model default.
+
 
 ---
 
@@ -187,6 +195,7 @@ JSON incidents include:
 - summary (title, description)
 - local_explanation
 - llm_prompt (prompt text only)
+
 
 ---
 
@@ -255,6 +264,7 @@ Options:
 - `--output`: Optional path to write JSON instead of stdout.
 - `--model-type`: `iforest` (default), `ocsvm`, `lof`.
 
+
 ---
 
 ## report
@@ -311,39 +321,155 @@ JSON reports include:
 - `top_incident_ips`
 - `top_targeted_users`
 
+
 ---
 
 ## Apache-specific CLI (`cli_apache`)
 
-For quick inspection of suspicious Apache error sessions, you can use the dedicated Apache CLI, which runs directly on `.log` files.
+The dedicated Apache CLI focuses on suspicious Apache error sessions, with list, explain, report, JSON output, and filters.
 
-### Basic usage
+### Top suspicious Apache sessions (text)
 
 ```bash
-python -m aegislog.cli_apache data/loghub/Apache.log -n 20
+python -m aegislog.cli_apache data/loghub/Apache.log --top 20
 ```
 
 This will:
 
 - Parse the Apache error log (`Apache.log`).
 - Build sessions and Apache-focused features (error vs notice ratio, bursts, rare templates, rare hour, etc.).
-- Score sessions using the resolved Apache model (or defaults).
-- Print the top 20 suspicious sessions with:
-
-  - session id (derived from session timeframe),
+- Score sessions using the resolved Apache model.
+- Print the top N suspicious sessions with:
+  - session id (derived from the session timeframe),
   - anomaly score,
   - error ratio,
   - 5xx burst size,
   - human-readable notes (e.g. “errors dominate over notices”, “many rare error templates”, “activity during unusual hours”).
 
-### Options
+### Top suspicious Apache sessions (JSON)
+
+```bash
+python -m aegislog.cli_apache \
+  data/loghub/Apache.log \
+  --top 10 \
+  --format json \
+  --output apache_top.json
+```
+
+Produces a JSON array of session summaries, each with fields like `session_id`, `score`, `error_ratio`, and `apache_notes`.
+
+### Explain a single suspicious Apache session
+
+```bash
+# Explain the first suspicious session after sorting
+python -m aegislog.cli_apache \
+  data/loghub/Apache.log \
+  --explain \
+  --first
+```
+
+- Prints a short summary (score, error ratio, 5xx burst, notes).
+- Builds Apache `IncidentEvidence` and prints key highlights and metrics (e.g. status_5xx, error_events, rare templates, rare path ratio).
+
+JSON evidence:
+
+```bash
+python -m aegislog.cli_apache \
+  data/loghub/Apache.log \
+  --explain \
+  --first \
+  --format json \
+  --output apache_explain.json
+```
+
+Produces a single evidence object with:
+
+- `incident_id` (e.g. `apache:<session-id>`),
+- `log_type` (`apache_error`),
+- `model_type`,
+- `highlights`,
+- `sessions` (one session with Apache-focused evidence),
+- `extra` (raw metrics used to build the explanation).
+
+### Apache report (aggregate metrics)
+
+```bash
+# Text report
+python -m aegislog.cli_apache \
+  data/loghub/Apache.log \
+  --report
+```
+
+```bash
+# JSON report
+python -m aegislog.cli_apache \
+  data/loghub/Apache.log \
+  --report \
+  --format json \
+  --output apache_report.json
+```
+
+The report summarizes the top suspicious sessions after sorting and (optionally) filtering, including:
+
+- total sessions considered,
+- rare-hour sessions,
+- sessions with 5xx bursts,
+- sessions with error bursts,
+- sessions with rare error templates,
+- sessions with high severity ratios,
+- sessions where errors dominate notices,
+- total error events,
+- top session IDs by score.
+
+### Apache filters
+
+You can narrow which Apache sessions are listed, explained, or reported:
+
+- `--min-score <float>`: Only include sessions at or above this anomaly/ensemble score.
+- `--rare-hour-only`: Only include sessions that occurred during unusual hours.
+- `--min-5xx-burst <int>`: Only include sessions with at least this many 5xx events in a one-minute burst.
+- `--min-error-events <int>`: Only include sessions with at least this many Apache error events.
+
+Examples:
+
+```bash
+# Report only on sessions during rare hours
+python -m aegislog.cli_apache \
+  data/loghub/Apache.log \
+  --report \
+  --rare-hour-only
+
+# JSON top sessions with at least 100 error events
+python -m aegislog.cli_apache \
+  data/loghub/Apache.log \
+  --top 5 \
+  --min-error-events 100 \
+  --format json \
+  --output apache_filtered_top.json
+
+# Try to explain a session with an extreme 5xx burst (may yield no sessions)
+python -m aegislog.cli_apache \
+  data/loghub/Apache.log \
+  --explain \
+  --first \
+  --min-5xx-burst 999999
+```
+
+Core Apache options:
 
 - `log_path` (positional): Path to Apache error log file.
-- `--log-type`: Currently `apache_error` only (default).
-- `--model-path`: Path to Apache anomaly model.  
-  If omitted, uses the Apache default for the selected `--model-type`.
+- `--log-type`: `apache_error` (default).
+- `--model-path`: Path to Apache anomaly model (or default via `resolve_model_path`).
 - `--model-type`: `iforest` (default), `ocsvm`, `lof`.
-- `-n`, `--top`: Number of top suspicious sessions to show.  
+- `--top`: Number of top sessions to show or consider.  
   Default: `20`.
-
-This is the fastest way to get a human-readable view of suspicious Apache error behavior without going through the full `analyze`/`incidents` flow.
+- `--explain`: Explain a single suspicious Apache session.
+- `--report`: Show an aggregate Apache report.
+- `--index`: Zero-based index into the filtered/sorted list when using `--explain`.
+- `--first`: Explain the first session after filtering and sorting.
+- `--min-score`: Minimum score threshold.
+- `--rare-hour-only`: Only sessions with `apache_rare_hour > 0`.
+- `--min-5xx-burst`: Minimum `apache_5xx_burst_max_per_minute`.
+- `--min-error-events`: Minimum `error_events`.
+- `--format`: `text` (default) or `json`.
+- `--output`: Optional path to write JSON instead of stdout.
