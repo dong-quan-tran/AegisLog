@@ -91,8 +91,34 @@ def _ensure_required_columns(df):
     return missing
 
 
+def _score_column(df) -> str:
+    return "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
+
+
+def _apply_apache_filters(df, args: argparse.Namespace):
+    if df.empty:
+        return df
+
+    filtered = df.copy()
+    score_col = _score_column(filtered)
+
+    if getattr(args, "min_score", None) is not None:
+        filtered = filtered[filtered[score_col] >= args.min_score]
+
+    if getattr(args, "rare_hour_only", False):
+        filtered = filtered[filtered["apache_rare_hour"] > 0]
+
+    if getattr(args, "min_5xx_burst", None) is not None:
+        filtered = filtered[filtered["apache_5xx_burst_max_per_minute"] >= args.min_5xx_burst]
+
+    if getattr(args, "min_error_events", None) is not None:
+        filtered = filtered[filtered["error_events"] >= args.min_error_events]
+
+    return filtered
+
+
 def _sorted_apache_df(df, top: int):
-    score_col = "ensemble_score" if "ensemble_score" in df.columns else "anomaly_score"
+    score_col = _score_column(df)
     return df.sort_values(score_col, ascending=False).head(top)
 
 
@@ -104,7 +130,7 @@ def _find_session_by_id(sessions: List[Session], session_id: str) -> Session | N
 
 
 def _build_apache_report_payload(df_sorted) -> dict:
-    score_col = "ensemble_score" if "ensemble_score" in df_sorted.columns else "anomaly_score"
+    score_col = _score_column(df_sorted)
 
     top_session_ids = df_sorted.sort_values(score_col, ascending=False)["session_id"].head(5).tolist()
 
@@ -147,10 +173,11 @@ def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
         print(f"scored data missing required columns: {', '.join(missing)}")
         return 1
 
-    df_sorted = _sorted_apache_df(df, top=max(args.top, 1))
+    filtered = _apply_apache_filters(df, args)
+    df_sorted = _sorted_apache_df(filtered, top=max(args.top, 1))
 
     if df_sorted.empty:
-        print("No sessions found.")
+        print("No sessions found after filtering.")
         return 0
 
     if getattr(args, "first", False):
@@ -158,7 +185,7 @@ def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
     else:
         index = getattr(args, "index", 0)
         if index < 0 or index >= len(df_sorted):
-            print(f"Invalid index {index}. There are {len(df_sorted)} session(s).")
+            print(f"Invalid index {index}. There are {len(df_sorted)} session(s) after filtering.")
             return 1
 
     row = df_sorted.iloc[index]
@@ -218,10 +245,11 @@ def _report_apache_sessions(args: argparse.Namespace, df) -> int:
         print(f"scored data missing required columns: {', '.join(missing)}")
         return 1
 
-    df_sorted = _sorted_apache_df(df, top=args.top)
+    filtered = _apply_apache_filters(df, args)
+    df_sorted = _sorted_apache_df(filtered, top=args.top)
 
     if df_sorted.empty:
-        print("No sessions found.")
+        print("No sessions found after filtering.")
         return 0
 
     payload = _build_apache_report_payload(df_sorted)
@@ -295,6 +323,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Explain the first session after sorting (used with --explain).",
     )
+    parser.add_argument(
+        "--min-score",
+        type=float,
+        default=None,
+        help="Only include sessions at or above this anomaly/ensemble score.",
+    )
+    parser.add_argument(
+        "--rare-hour-only",
+        action="store_true",
+        help="Only include sessions that occurred during unusual hours.",
+    )
+    parser.add_argument(
+        "--min-5xx-burst",
+        type=int,
+        default=None,
+        help="Only include sessions with at least this many 5xx events in a one-minute burst.",
+    )
+    parser.add_argument(
+        "--min-error-events",
+        type=int,
+        default=None,
+        help="Only include sessions with at least this many Apache error events.",
+    )
     add_json_output_args(parser, "Apache sessions, explanation, or report")
     return parser
 
@@ -324,10 +375,11 @@ def main(argv: List[str] | None = None) -> int:
         print(f"scored data missing required columns: {', '.join(missing)}")
         return 1
 
-    df_sorted = _sorted_apache_df(df, top=args.top)
+    filtered = _apply_apache_filters(df, args)
+    df_sorted = _sorted_apache_df(filtered, top=args.top)
 
     if df_sorted.empty:
-        print("No sessions found.")
+        print("No sessions found after filtering.")
         return 0
 
     if getattr(args, "format", "text") == "json":
