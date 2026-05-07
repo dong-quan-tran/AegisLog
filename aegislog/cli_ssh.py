@@ -19,6 +19,10 @@ from aegislog.ai.ai import (
 )
 
 
+from aegislog.ai.prompting import build_incident_prompt
+from aegislog.ai.client import generate_incident_analysis, LLMError
+
+
 from aegislog.incidents import (
     group_sessions_to_incidents,
     summarize_incident,
@@ -288,23 +292,19 @@ def cmd_explain(args: argparse.Namespace) -> None:
         print("Currently, explain is only implemented for ssh_auth logs.")
         return
 
-
     sessions, df, incidents = load_ssh_incidents_for_cli(
         args,
         anomalous_only=getattr(args, "alerts_only", False),
         restrict_sessions_to_df=True,
     )
 
-
     if df.empty:
         print("No sessions found.")
         return
 
-
     if not incidents:
         print("No incidents found.")
         return
-
 
     incidents = filter_incidents_by_thresholds(
         incidents,
@@ -312,17 +312,14 @@ def cmd_explain(args: argparse.Namespace) -> None:
         min_confidence=getattr(args, "min_confidence", None),
     )
 
-
     incidents = filter_incidents_by_patterns(
         incidents,
         patterns=getattr(args, "patterns", None),
     )
 
-
     if not incidents:
         print("No incidents matched the specified severity/confidence/pattern filters.")
         return
-
 
     if getattr(args, "first", False):
         inc = incidents[0]
@@ -337,9 +334,7 @@ def cmd_explain(args: argparse.Namespace) -> None:
         inc = incidents[args.index]
         index = args.index
 
-
     timeline = build_incident_timeline(inc, sessions, df)
-
 
     print(f"Explaining incident at index {index}: {inc.incident_id}")
     print(
@@ -354,36 +349,28 @@ def cmd_explain(args: argparse.Namespace) -> None:
         f"avg_anomaly_score={inc.avg_anomaly_score:.3f}"
     )
 
-
     if getattr(inc, "severity_reason", None):
         print(f"  severity_reason={inc.severity_reason}")
-
 
     if getattr(inc, "confidence_reason", None):
         print(f"  confidence_reason={inc.confidence_reason}")
 
-
     if getattr(inc, "priority_reason", None):
         print(f"  priority_reason={inc.priority_reason}")
-
 
     if getattr(inc, "attack_pattern_reason", None):
         print(f"  attack_pattern_reason={inc.attack_pattern_reason}")
 
-
     summary = summarize_incident(inc)
     print(f"  summary_title={summary.title}")
     print(f"  summary_description={summary.description}")
-
 
     explanation = local_incident_explanation(inc, summary)
     print("  local_explanation_begin")
     print(f"    {explanation}")
     print("  local_explanation_end")
 
-
     llm_prompt = build_incident_llm_prompt(inc, summary)
-
 
     evidence = build_ssh_incident_evidence(
         inc,
@@ -393,12 +380,23 @@ def cmd_explain(args: argparse.Namespace) -> None:
         threshold_percentile=getattr(args, "threshold_percentile", 99.0),
     )
 
+    ai_analysis = None
+    if getattr(args, "use_llm", False):
+        try:
+            report = build_incident_report(incidents)
+            prompt = build_incident_prompt(
+                incident=inc,
+                evidence=evidence,
+                timeline=timeline,
+                report=report,
+            )
+            ai_analysis = generate_incident_analysis(prompt)
+        except LLMError as e:
+            print(f"  [AI analysis unavailable] {e}")
 
     if getattr(args, "format", "text") == "json":
-        # Backwards-compatible shape expected by tests and existing consumers
         legacy = incident_to_dict(inc, summary, explanation, llm_prompt)
 
-        # New evidence object lives alongside the legacy fields
         payload = {
             "incident": legacy["incident"],
             "summary": legacy["summary"],
@@ -407,20 +405,43 @@ def cmd_explain(args: argparse.Namespace) -> None:
             "incident_evidence": evidence.to_dict(),
         }
 
+        if ai_analysis is not None:
+            payload["ai_analysis"] = ai_analysis
+
         data = json.dumps(payload, indent=2)
         write_output(data, getattr(args, "output", None))
         return
 
+    if ai_analysis is not None:
+        print("  ai_summary_begin")
+        for line in ai_analysis["summary"].splitlines():
+            print(f"    {line}")
+        print("  ai_summary_end")
 
-    if getattr(args, "use_llm", False):
-        try:
-            llm_response = call_llm_for_incident(llm_prompt)
-            print("  llm_response_begin")
-            for line in llm_response.splitlines():
-                print(f"    {line}")
-            print("  llm_response_end")
-        except LLMConfigError as e:
-            print(f"  [LLM disabled] {e}")
+        print("  ai_evidence_begin")
+        for item in ai_analysis["evidence"]:
+            print(f"    - {item}")
+        print("  ai_evidence_end")
+
+        print("  ai_hypothesis_begin")
+        for line in ai_analysis["hypothesis"].splitlines():
+            print(f"    {line}")
+        print("  ai_hypothesis_end")
+
+        print("  ai_caveats_begin")
+        for item in ai_analysis["caveats"]:
+            print(f"    - {item}")
+        print("  ai_caveats_end")
+
+        print("  ai_next_steps_begin")
+        for item in ai_analysis["next_steps"]:
+            print(f"    - {item}")
+        print("  ai_next_steps_end")
+
+        if ai_analysis.get("playbook_slug"):
+            print(f"  playbook_slug={ai_analysis['playbook_slug']}")
+        if ai_analysis.get("playbook_notes"):
+            print(f"  playbook_notes={ai_analysis['playbook_notes']}")
     else:
         prompt_text = explain_incident_with_llm(llm_prompt)
         print("  llm_prompt_begin")
