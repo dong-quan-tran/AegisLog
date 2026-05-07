@@ -12,7 +12,7 @@ from aegislog.ml.pipeline import (
 )
 
 
-from aegislog.ai import (
+from aegislog.ai.ai import (
     build_incident_llm_prompt,
     explain_incident_with_llm,
     local_incident_explanation,
@@ -28,7 +28,7 @@ from aegislog.incidents import (
 )
 
 
-from aegislog.ai_client import call_llm_for_incident, LLMConfigError
+from aegislog.ai.client import call_llm_for_incident, LLMConfigError
 
 
 from aegislog.cli_common import (
