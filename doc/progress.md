@@ -1352,3 +1352,61 @@ tests/test_incident_evidence_apache.py does the same for build_apache_incident_e
 Updated tests/test_cli_explain_integration.py to continue asserting the legacy JSON contract while now being satisfied by the refactored explain flow that adds incident_evidence for debugging and downstream tooling.
 
 Ran python -m pytest and confirmed that the entire test suite, including the new incident evidence and explain JSON integration tests, passes successfully.
+
+
+## 2026-05-06
+
+### Focus
+Bring Apache up to the same “fully utilized” level as SSH by expanding the Apache CLI, wiring in evidence, and updating docs.
+
+### Code changes
+
+- Extended `aegislog.cli_apache` from a simple “top sessions” tool into a full-featured Apache anomaly CLI:
+  - Added `--format text|json` and `--output` for machine-readable top-session output.
+  - Introduced `--explain` mode that selects a suspicious Apache session, builds `IncidentEvidence` via `build_apache_incident_evidence(...)`, and prints highlights plus key metrics.
+  - Added JSON evidence output for Apache explain, compatible with downstream tooling and debugging.
+  - Implemented `--report` mode to summarize Apache anomalies across top sessions (rare hours, error bursts, rare templates, error dominance, total error events, top session IDs).
+  - Added Apache-specific filters used by list, explain, and report:
+    - `--min-score`
+    - `--rare-hour-only`
+    - `--min-5xx-burst`
+    - `--min-error-events`
+- Ensured Apache CLI respects `--model-type` and `--model-path`, so trained Apache models (iforest/ocsvm/lof) can be used consistently across analyze, explain, and report flows.
+
+### Testing
+
+- Added and ran integration tests for Apache CLI:
+  - `tests/test_cli_apache.py`:
+    - Smoke test for top suspicious sessions (text).
+    - JSON top-sessions test.
+  - `tests/test_cli_apache_explain_integration.py`:
+    - `--explain --first` text-mode explain test (checks summary, highlights, metrics).
+    - `--explain --first --format json --output ...` evidence JSON test (checks incident_id, log_type, highlights, sessions, extra).
+  - `tests/test_cli_apache_report_integration.py`:
+    - `--report` text-mode report test (checks header and key fields).
+    - `--report --format json --output ...` JSON report test (validates aggregate fields and top_session_ids).
+  - `tests/test_cli_apache_filters_integration.py`:
+    - `--report --rare-hour-only` behavior.
+    - JSON top sessions with `--min-error-events`.
+    - Explain behavior when filters remove all sessions.
+- Ran the full test suite (`python -m pytest`) and confirmed all tests pass.
+
+### Documentation
+
+- Updated `cli_usage_cheatsheet.md`:
+  - Documented Apache CLI usage alongside SSH:
+    - Top sessions (text/JSON).
+    - Explain (text/JSON evidence).
+    - Report (text/JSON).
+    - Apache filter flags.
+  - Refreshed quick-start examples to include Apache explain and report flows.
+- Updated `training_cheatsheet.md`:
+  - Clarified `--model-type` usage for SSH and Apache (`iforest`, `ocsvm`, `lof`).
+  - Added examples for training multiple model types and using them in `analyze`, `incidents`, `report`, and `cli_apache`.
+  - Documented how Apache models flow into `cli_apache` (top sessions, explain, report).
+
+### Outcome
+
+- Apache is now “fully utilized” for this phase:
+  - It has list, explain, and report flows comparable to SSH, plus JSON output, evidence integration, and practical filters.
+  - CLI and training docs are up to date for both SSH and Apache, making the project’s capabilities clear and reproducible.
