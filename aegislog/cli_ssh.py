@@ -32,9 +32,6 @@ from aegislog.incidents import (
 )
 
 
-from aegislog.ai.client import call_llm_for_incident, LLMConfigError
-
-
 from aegislog.cli_common import (
     SEVERITY_CHOICES,
     CONFIDENCE_CHOICES,
@@ -867,3 +864,25 @@ def register_report_parser(subparsers) -> None:
         ),
     )
     p_report.set_defaults(func=cmd_report)
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="AegisLog SSH incident CLI."
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    register_incidents_parser(subparsers)
+    register_explain_parser(subparsers)
+    register_report_parser(subparsers)
+
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
