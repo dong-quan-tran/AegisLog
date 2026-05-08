@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
 
 from aegislog.ai.playbooks import Playbook, lookup_playbook
 
@@ -20,7 +20,17 @@ REQUIRED_KEYS = [
 ]
 
 
-def generate_incident_analysis(prompt: Dict[str, Any]) -> Dict[str, Any]:
+class IncidentAIAnalysis(TypedDict):
+    summary: str
+    evidence: List[str]
+    hypothesis: str
+    caveats: List[str]
+    next_steps: List[str]
+    playbook_slug: Optional[str]
+    playbook_notes: Optional[str]
+
+
+def generate_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
     """
     Core AI entrypoint for incident analysis.
 
@@ -33,7 +43,7 @@ def generate_incident_analysis(prompt: Dict[str, Any]) -> Dict[str, Any]:
     return validate_ai_analysis(analysis)
 
 
-def validate_ai_analysis(payload: Dict[str, Any]) -> Dict[str, Any]:
+def validate_ai_analysis(payload: Dict[str, Any]) -> IncidentAIAnalysis:
     """
     Validate that the AI analysis payload matches the expected schema.
 
@@ -51,25 +61,43 @@ def validate_ai_analysis(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise LLMError("AI analysis 'summary' must be a string.")
     if not isinstance(payload["evidence"], list):
         raise LLMError("AI analysis 'evidence' must be a list of strings.")
+    if not all(isinstance(item, str) for item in payload["evidence"]):
+        raise LLMError("AI analysis 'evidence' must contain only strings.")
+
     if not isinstance(payload["hypothesis"], str):
         raise LLMError("AI analysis 'hypothesis' must be a string.")
     if not isinstance(payload["caveats"], list):
         raise LLMError("AI analysis 'caveats' must be a list of strings.")
+    if not all(isinstance(item, str) for item in payload["caveats"]):
+        raise LLMError("AI analysis 'caveats' must contain only strings.")
+
     if not isinstance(payload["next_steps"], list):
         raise LLMError("AI analysis 'next_steps' must be a list of strings.")
+    if not all(isinstance(item, str) for item in payload["next_steps"]):
+        raise LLMError("AI analysis 'next_steps' must contain only strings.")
+
     if payload["playbook_slug"] is not None and not isinstance(
         payload["playbook_slug"], str
     ):
         raise LLMError("AI analysis 'playbook_slug' must be a string or None.")
+
     if payload["playbook_notes"] is not None and not isinstance(
         payload["playbook_notes"], str
     ):
         raise LLMError("AI analysis 'playbook_notes' must be a string or None.")
 
-    return payload
+    return IncidentAIAnalysis(
+        summary=payload["summary"],
+        evidence=payload["evidence"],
+        hypothesis=payload["hypothesis"],
+        caveats=payload["caveats"],
+        next_steps=payload["next_steps"],
+        playbook_slug=payload["playbook_slug"],
+        playbook_notes=payload["playbook_notes"],
+    )
 
 
-def _mock_incident_analysis(prompt: Dict[str, Any]) -> Dict[str, Any]:
+def _mock_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
     """
     Deterministic, provider-free implementation of incident analysis.
 
@@ -95,18 +123,20 @@ def _mock_incident_analysis(prompt: Dict[str, Any]) -> Dict[str, Any]:
 
     playbook_slug: Optional[str] = playbook.slug if playbook else None
     playbook_notes: Optional[str] = (
-        playbook.description if playbook else "No specific playbook matched; using generic guidance."
+        playbook.description
+        if playbook
+        else "No specific playbook matched; using generic guidance."
     )
 
-    return {
-        "summary": summary,
-        "evidence": evidence_bullets,
-        "hypothesis": hypothesis,
-        "caveats": caveats,
-        "next_steps": next_steps,
-        "playbook_slug": playbook_slug,
-        "playbook_notes": playbook_notes,
-    }
+    return IncidentAIAnalysis(
+        summary=summary,
+        evidence=evidence_bullets,
+        hypothesis=hypothesis,
+        caveats=caveats,
+        next_steps=next_steps,
+        playbook_slug=playbook_slug,
+        playbook_notes=playbook_notes,
+    )
 
 
 def _build_summary(
@@ -147,20 +177,24 @@ def _build_evidence_bullets(
     fail_streak = incident.get("auth_failed_streak_max")
 
     if total_events is not None:
-        bullets.append(f"Total SSH authentication events in this incident: {total_events}.")
+        bullets.append(
+            f"Total SSH authentication events in this incident: {total_events}."
+        )
     if auth_failed is not None and auth_success is not None:
         bullets.append(
             f"Observed {auth_failed} failed and {auth_success} successful SSH authentication attempts."
         )
     if auth_fail_ratio is not None:
-        bullets.append(f"Authentication failure ratio is approximately {auth_fail_ratio:.2f}.")
+        bullets.append(
+            f"Authentication failure ratio is approximately {auth_fail_ratio:.2f}."
+        )
     if fail_streak is not None and fail_streak > 0:
         bullets.append(f"Maximum consecutive failed logins: {fail_streak}.")
     if auth_burst is not None and auth_burst > 0:
-        bullets.append(f"Maximum failed-login burst in a one-minute window: {auth_burst} events.")
+        bullets.append(
+            f"Maximum failed-login burst in a one-minute window: {auth_burst} events."
+        )
 
-    # Add a couple of generic evidence lines from IncidentEvidence if present.
-    # We keep this generic so it works for both SSH and Apache later.
     highlights = evidence.get("highlights") or []
     if isinstance(highlights, list) and highlights:
         bullets.append("Evidence highlights:")
@@ -176,7 +210,6 @@ def _build_hypothesis(
     playbook: Optional[Playbook],
 ) -> str:
     if playbook is not None:
-        # Use playbook title/description as the primary hypothesis anchor.
         return (
             f"The activity is most consistent with '{playbook.title}', "
             f"suggesting {playbook.description.lower()}"
@@ -184,8 +217,8 @@ def _build_hypothesis(
 
     if attack_pattern == "brute_force":
         return (
-            "The pattern of repeated authentication failures suggests a brute-force attempt "
-            "against one or more accounts."
+            "The pattern of repeated authentication failures suggests a brute-force "
+            "attempt against one or more accounts."
         )
     if attack_pattern == "password_spray":
         return (
@@ -240,7 +273,6 @@ def _build_next_steps(playbook: Optional[Playbook]) -> List[str]:
     if playbook is not None and playbook.next_steps:
         return list(playbook.next_steps)
 
-    # Generic fallback guidance if no specific playbook matches.
     return [
         "Review detailed logs for the affected host(s) around the time of this incident.",
         "Confirm whether any high-value accounts were successfully accessed during the incident window.",
