@@ -15,6 +15,7 @@ def test_lookup_playbook_returns_exact_match_for_brute_force_medium() -> None:
     result = lookup_playbook("brute_force", "medium")
 
     assert result is not None
+    assert isinstance(result, Playbook)
     assert result.slug == "ssh_bruteforce_medium"
     assert "brute-force" in result.title.lower()
     assert len(result.next_steps) > 0
@@ -61,6 +62,7 @@ def test_lookup_playbook_returns_apache_placeholder_playbook() -> None:
     result = lookup_playbook("apache_error_spike", "medium")
 
     assert result is not None
+    assert isinstance(result, Playbook)
     assert result.slug == "apache_error_spike_medium"
     assert "apache error spike" in result.title.lower()
     assert len(result.next_steps) > 0
