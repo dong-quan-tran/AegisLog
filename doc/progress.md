@@ -1410,3 +1410,77 @@ Bring Apache up to the same “fully utilized” level as SSH by expanding the A
 - Apache is now “fully utilized” for this phase:
   - It has list, explain, and report flows comparable to SSH, plus JSON output, evidence integration, and practical filters.
   - CLI and training docs are up to date for both SSH and Apache, making the project’s capabilities clear and reproducible.
+
+
+Progress log: 05/07/2026
+Code changes
+Cleaned up aegislog/ai/client.py
+
+Removed the accidental self-import that caused a circular import during pytest collection.
+
+Defined and wired up IncidentAIAnalysis as a TypedDict to represent the structured AI analysis payload.
+
+Updated generate_incident_analysis to return a validated, typed analysis result.
+
+Strengthened validate_ai_analysis to check key presence and basic types, including element types inside evidence, caveats, and next_steps.
+
+Ensured the mock implementation _mock_incident_analysis always returns a payload conforming to IncidentAIAnalysis.
+
+Added unit tests for the AI client
+
+Created tests/test_ai_client.py.
+
+Added tests to verify:
+
+generate_incident_analysis returns a dict with all required keys, correct types, and optional fields as str | None.
+
+validate_ai_analysis accepts a valid payload unchanged.
+
+validate_ai_analysis rejects payloads with missing required keys by raising LLMError.
+
+validate_ai_analysis rejects wrong types (e.g., non-list evidence) and surfaces the issue via LLMError.
+
+The incident analysis path returns a playbook-aware result and non-empty next_steps for a brute-force style prompt.
+
+Added unit tests for playbook lookup
+
+Created tests/test_ai_playbooks.py.
+
+Added tests to verify:
+
+Exact matches return the expected Playbook for SSH possible compromise and brute-force cases.
+
+Fallback behavior uses the “medium” severity playbook when a specific severity is missing.
+
+Low-signal background noise returns the low-severity SSH playbook.
+
+Unknown patterns return None when neither exact nor medium fallback exists.
+
+Apache placeholder playbook (apache_error_spike_medium) is returned correctly and has non-empty next_steps.
+
+Tooling and testing
+Fixed pytest collection issues by:
+
+Removing the circular import in client.py.
+
+Removing an invalid IncidentPrompt import from the test file and shifting tests to operate on dict-shaped prompts.
+
+Ran pytest successfully for:
+
+tests/test_ai_client.py
+
+tests/test_ai_playbooks.py
+
+Git commits
+Committed the client.py fixes with a focused “fix(ai)” style message.
+
+Committed the client tests and playbook tests with “test(ai)” style messages to keep implementation and verification cleanly separated.
+
+Architectural progress
+Solidified the AI output contract (IncidentAIAnalysis) and enforced it via validation and tests.
+
+Verified that the mock AI analysis path is now schema-stable and that playbook lookup behavior is covered, which sets a solid foundation for:
+
+Extending explain support to Apache incidents.
+
+Swapping in a real LLM backend later with less risk of schema drift.
