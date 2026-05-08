@@ -1,6 +1,7 @@
 # AegisLog CLI Usage Cheatsheet
 
 
+
 ## Quick start
 
 From the project root (with your virtualenv activated):
@@ -12,8 +13,8 @@ python -m aegislog.cli analyze data/loghub/SSH.log --log-type ssh_auth --top 10
 # 2) See the worst SSH incidents (medium+ severity)
 python -m aegislog.cli incidents data/loghub/SSH.log --log-type ssh_auth --min-severity medium --top 5
 
-# 3) Explain the highest-severity SSH incident
-python -m aegislog.cli explain data/loghub/SSH.log --log-type ssh_auth --min-severity high --first
+# 3) Explain the highest-severity SSH incident with AI-style analysis
+python -m aegislog.cli explain data/loghub/SSH.log --log-type ssh_auth --min-severity high --first --use-llm --format json --output explain_ai.json
 
 # 4) See the top suspicious Apache error sessions via main CLI
 python -m aegislog.cli analyze data/loghub/Apache.log --log-type apache_error --top 10
@@ -23,6 +24,7 @@ python -m aegislog.cli_apache data/loghub/Apache.log -n 20
 python -m aegislog.cli_apache data/loghub/Apache.log --explain --first
 python -m aegislog.cli_apache data/loghub/Apache.log --report
 ```
+
 
 
 ---
@@ -49,6 +51,7 @@ Additional Apache-specific CLI:
 - `cli_apache` (run via `python -m aegislog.cli_apache`)
 
 
+
 ---
 
 ## init
@@ -58,6 +61,7 @@ Initialize experiment database (currently a placeholder).
 ```bash
 python -m aegislog.cli init
 ```
+
 
 
 ---
@@ -89,6 +93,7 @@ Key options:
 - `--model-path` (optional): Where to save the trained model.  
   Default: `models/log_anomaly_iforest.joblib` (or a log-type-specific default).
 - `--model-type`: `iforest` (default), `ocsvm`, `lof`.
+
 
 
 ---
@@ -133,6 +138,7 @@ Common options:
 - `--profile`: Shortcut:
   - `apache` → `--log-type apache_error` + Apache model default.
   - `ssh` → `--log-type ssh_auth` + SSH model default.
+
 
 
 ---
@@ -197,6 +203,7 @@ JSON incidents include:
 - llm_prompt (prompt text only)
 
 
+
 ---
 
 ## explain
@@ -235,16 +242,31 @@ python -m aegislog.cli explain \
   --output explain.json
 ```
 
-### Call a real LLM (requires OPENAI_API_KEY)
+### AI-augmented explain (structured analysis)
 
 ```bash
+# Write AI-augmented explain JSON to a file
 python -m aegislog.cli explain \
   data/loghub/SSH.log \
   --log-type ssh_auth \
-  --model-path models/log_anomaly_iforest_ssh.joblib \
-  --index 0 \
-  --use-llm
+  --first \
+  --use-llm \
+  --format json \
+  --output explain_ai.json
 ```
+
+This produces a JSON object that includes:
+
+- all the usual explain fields (`incident`, `summary`, `local_explanation`, `llm_prompt`, `incident_evidence`),
+- a new `ai_analysis` object with:
+  - `summary` – short natural-language description of the incident,
+  - `evidence` – bullet-style points referencing key metrics,
+  - `hypothesis` – likely scenario (e.g., brute force, password spray, possible compromise),
+  - `caveats` – limitations and uncertainties,
+  - `next_steps` – concrete investigation / response actions,
+  - `playbook_slug` and `playbook_notes` – which internal playbook was used to suggest next steps.
+
+The current implementation uses an internal, deterministic analysis backend that combines `IncidentEvidence`, attack pattern, timeline summary, and aggregates to populate this structure. It does not require an external API key.
 
 Options:
 
@@ -259,10 +281,11 @@ Options:
 - `--min-confidence`: Only consider incidents at or above this confidence when selecting:
   - `low`, `medium`, `high`.
 - `--first`: Explain the first incident after applying severity/confidence filters.
-- `--use-llm`: Call a real LLM for the explanation (otherwise only prints the constructed prompt).
+- `--use-llm`: Enable AI-style analysis (currently uses an internal, provider-agnostic backend).
 - `--format`: `text` (default) or `json`.
 - `--output`: Optional path to write JSON instead of stdout.
 - `--model-type`: `iforest` (default), `ocsvm`, `lof`.
+
 
 
 ---
@@ -320,6 +343,7 @@ JSON reports include:
 - `attack_pattern_counts`
 - `top_incident_ips`
 - `top_targeted_users`
+
 
 
 ---
