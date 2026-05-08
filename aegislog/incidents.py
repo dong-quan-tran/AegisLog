@@ -6,9 +6,7 @@ from typing import Any, Dict, List, Optional, Iterable
 import pandas as pd
 
 from aegislog.features.sessions import Session
-
 from aegislog.ml.pipeline import get_model_version
-
 
 
 @dataclass
@@ -36,7 +34,6 @@ class Incident:
     targeted_users: List[str]
     first_seen: Optional[datetime]
     last_seen: Optional[datetime]
-    # SSH-focused aggregates
     auth_failed_streak_max: int = 0
     auth_burst_max_per_minute: int = 0
 
@@ -162,19 +159,14 @@ def _classify_attack_pattern(
     targeted_users: List[str],
     has_success_after_failures: bool,
 ) -> tuple[str, str]:
-    """
-    Classify SSH attack pattern based on auth behavior and targeted user spread.
-    """
     unique_users = len(targeted_users)
 
-    # Possible account compromise: failures then success
     if has_success_after_failures and auth_success > 0:
         return (
             "possible_compromise",
             "failed SSH authentications followed by successful login(s) for the same source IP",
         )
 
-    # Username / password spray: many users, all failures
     if (
         auth_failed >= 100
         and unique_users >= 5
@@ -187,7 +179,6 @@ def _classify_attack_pattern(
             f"{unique_users} distinct user(s) with no successes",
         )
 
-    # Classic brute-force on a small user set
     if auth_failed >= 100 and unique_users <= 3 and auth_fail_ratio >= 0.9:
         return (
             "brute_force",
@@ -195,14 +186,12 @@ def _classify_attack_pattern(
             f"{unique_users} user(s) with very high failure ratio",
         )
 
-    # Low-signal background noise
     if auth_failed < 20 and auth_success == 0:
         return (
             "low_signal",
             "low-volume failed SSH authentication activity without clear brute-force characteristics",
         )
 
-    # Default suspicious auth activity
     return (
         "suspicious_auth_activity",
         "SSH authentication pattern shows some suspicious characteristics but does not match a more specific pattern",
@@ -220,7 +209,6 @@ def _compute_priority(
     sev_score = SEVERITY_TO_SCORE.get(severity, 25)
     conf_score = CONFIDENCE_TO_SCORE.get(confidence, 30)
 
-    # Simple multiplicative-style combination inspired by risk scoring
     priority_score = round((sev_score * conf_score) / 100)
 
     if priority_score >= 68:
@@ -248,15 +236,9 @@ def _compute_severity(
     auth_failed_streak_max: int = 0,
     auth_burst_max_per_minute: int = 0,
 ) -> str:
-    """
-    Severity uses anomaly score, failed volume/ratio, and SSH intensity indicators.
-    """
-
-    # Compromise-like: failures then success, plus decent anomaly and volume
     if has_success_after_failures and avg_anomaly_score >= 0.20 and auth_failed >= 20:
         return "high"
 
-    # Extremely automated behavior: very high volume and intensity
     if (
         auth_failed >= 1000
         and auth_fail_ratio >= 0.95
@@ -264,7 +246,6 @@ def _compute_severity(
     ):
         return "high"
 
-    # Strong brute-force pattern
     if (
         avg_anomaly_score >= 0.25
         and auth_failed >= 500
@@ -272,7 +253,6 @@ def _compute_severity(
     ):
         return "high"
 
-    # Elevated, but not extreme
     if (
         avg_anomaly_score >= 0.15
         and auth_failed >= 50
@@ -327,10 +307,6 @@ def _compute_confidence(
     auth_failed_streak_max: int = 0,
     auth_burst_max_per_minute: int = 0,
 ) -> str:
-    """
-    Confidence increases with repeated evidence, high volume, and success-after-failures.
-    """
-
     if (
         has_success_after_failures
         or (auth_failed >= 100 and session_count >= 2 and auth_fail_ratio >= 0.90)
@@ -450,7 +426,6 @@ def group_sessions_to_incidents(
 
     for _, row in scores_df.iterrows():
         ip = row["ip"]
-        user = row.get("user")
 
         if not isinstance(ip, str) or not ip:
             continue
@@ -710,6 +685,7 @@ def build_incident_report(
 
     return report
 
+
 def build_ssh_incident_evidence(
     incident: Incident,
     timeline: Iterable[IncidentTimelineEntry],
@@ -717,11 +693,7 @@ def build_ssh_incident_evidence(
     model_type: str = "iforest",
     threshold_percentile: float = 99.0,
 ) -> "IncidentEvidence":
-    """
-    Build an IncidentEvidence object for an SSH incident, using the existing
-    Incident and IncidentTimelineEntry structures.
-    """
-    from aegislog.incident.evidence import IncidentEvidence, SessionEvidence  # local import to avoid cycles
+    from aegislog.incident.evidence import IncidentEvidence, SessionEvidence
 
     session_evidence: List[SessionEvidence] = []
 
@@ -740,7 +712,7 @@ def build_ssh_incident_evidence(
                 session_id=entry.session_id,
                 anomaly_score=entry.anomaly_score,
                 start_time=entry.timestamp.isoformat() if entry.timestamp else None,
-                end_time=None,  # can be filled later if needed
+                end_time=None,
                 ip=entry.ip,
                 user=entry.user,
                 auth_failed=entry.auth_failed,
@@ -771,7 +743,9 @@ def build_ssh_incident_evidence(
             f"Peak SSH event rate reached {incident.auth_burst_max_per_minute} events per minute."
         )
     if not highlights:
-        highlights.append("SSH authentication behavior is anomalous but does not match a more specific pattern.")
+        highlights.append(
+            "SSH authentication behavior is anomalous but does not match a more specific pattern."
+        )
 
     extra: Dict[str, Any] = {
         "severity_reason": incident.severity_reason,
@@ -806,6 +780,98 @@ def build_ssh_incident_evidence(
     )
     return evidence
 
+
+def _classify_apache_attack_pattern(
+    *,
+    status_5xx: int,
+    error_events: int,
+    rare_ratio: float,
+    path_ratio: float,
+    burst_5xx: int,
+    burst_error: int,
+    rare_hour: int,
+    error_vs_notice_ratio: float,
+    high_severity_ratio: float,
+) -> tuple[str, str]:
+    if burst_5xx >= 5 or burst_error >= 10:
+        return (
+            "apache_error_spike",
+            "bursty Apache 4xx/5xx or error activity suggests a concentrated spike in failures",
+        )
+
+    if high_severity_ratio > 0.1:
+        return (
+            "apache_high_severity_errors",
+            "non-trivial share of crit/alert/emerg Apache events indicates elevated severity log activity",
+        )
+
+    if rare_ratio >= 0.3 or path_ratio >= 0.3:
+        return (
+            "apache_rare_behavior",
+            "rare error templates or paths suggest unusual Apache behavior that may reflect probing or misconfiguration",
+        )
+
+    if rare_hour:
+        return (
+            "apache_rare_hour_activity",
+            "Apache activity occurred during an unusual hour compared with baseline behavior",
+        )
+
+    if error_events > 0 and error_vs_notice_ratio > 2.0:
+        return (
+            "apache_error_dominance",
+            "Apache error activity dominates notices, suggesting unhealthy or suspicious behavior",
+        )
+
+    return (
+        "apache_anomalous_session",
+        "Apache behavior was anomalous but did not match a more specific pattern",
+    )
+
+
+def _compute_apache_severity(
+    *,
+    anomaly_score: float,
+    status_5xx: int,
+    burst_5xx: int,
+    burst_error: int,
+    high_severity_ratio: float,
+) -> str:
+    if burst_5xx >= 5 or burst_error >= 10 or high_severity_ratio > 0.1:
+        return "medium"
+
+    if anomaly_score >= 0.20 and status_5xx > 0:
+        return "medium"
+
+    return "low"
+
+
+def _compute_apache_confidence(
+    *,
+    status_5xx: int,
+    error_events: int,
+    rare_count: int,
+    burst_5xx: int,
+    burst_error: int,
+    rare_ratio: float,
+    path_ratio: float,
+    high_severity_ratio: float,
+) -> str:
+    if (
+        burst_5xx >= 5
+        or burst_error >= 10
+        or high_severity_ratio > 0.1
+        or rare_ratio >= 0.3
+        or path_ratio >= 0.3
+    ):
+        return "medium"
+
+    if status_5xx > 0 or error_events > 0 or rare_count > 0:
+        return "low"
+
+    return "low"
+
+
 def build_apache_incident_evidence(
     session: Session,
     session_row: pd.Series,
@@ -814,7 +880,6 @@ def build_apache_incident_evidence(
     threshold_percentile: float = 99.0,
 ) -> "IncidentEvidence":
     from aegislog.incident.evidence import IncidentEvidence, SessionEvidence
-    from aegislog.ml.pipeline import get_model_version
 
     notes: List[str] = []
     highlights: List[str] = []
@@ -828,6 +893,8 @@ def build_apache_incident_evidence(
     burst_error = int(session_row.get("apache_error_burst_max_per_minute", 0))
     rare_hour = int(session_row.get("apache_rare_hour", 0))
     anomaly_score = float(session_row.get("anomaly_score", 0.0))
+    error_vs_notice_ratio = float(session_row.get("apache_error_vs_notice_ratio", 0.0))
+    high_severity_ratio = float(session_row.get("apache_high_severity_ratio", 0.0))
 
     if status_5xx > 0:
         notes.append(f"{status_5xx} server-error events in this session")
@@ -857,7 +924,42 @@ def build_apache_incident_evidence(
     if rare_hour:
         highlights.append("The session occurred during an unusual hour for Apache activity.")
     if not highlights:
-        highlights.append("Apache behavior was anomalous but without a single dominant indicator.")
+        highlights.append(
+            "Apache behavior was anomalous but without a single dominant indicator."
+        )
+
+    attack_pattern, attack_pattern_reason = _classify_apache_attack_pattern(
+        status_5xx=status_5xx,
+        error_events=error_events,
+        rare_ratio=rare_ratio,
+        path_ratio=path_ratio,
+        burst_5xx=burst_5xx,
+        burst_error=burst_error,
+        rare_hour=rare_hour,
+        error_vs_notice_ratio=error_vs_notice_ratio,
+        high_severity_ratio=high_severity_ratio,
+    )
+
+    severity = _compute_apache_severity(
+        anomaly_score=anomaly_score,
+        status_5xx=status_5xx,
+        burst_5xx=burst_5xx,
+        burst_error=burst_error,
+        high_severity_ratio=high_severity_ratio,
+    )
+
+    confidence = _compute_apache_confidence(
+        status_5xx=status_5xx,
+        error_events=error_events,
+        rare_count=rare_count,
+        burst_5xx=burst_5xx,
+        burst_error=burst_error,
+        rare_ratio=rare_ratio,
+        path_ratio=path_ratio,
+        high_severity_ratio=high_severity_ratio,
+    )
+
+    priority = "medium" if severity == "medium" else "low"
 
     session_ev = SessionEvidence(
         session_id=session.session_id,
@@ -878,19 +980,26 @@ def build_apache_incident_evidence(
         "error_events": error_events,
         "notice_events": int(session_row.get("notice_events", 0)),
         "apache_5xx_streak_max": int(session_row.get("apache_5xx_streak_max", 0)),
-        "apache_404_burst_max_per_minute": int(session_row.get("apache_404_burst_max_per_minute", 0)),
+        "apache_404_burst_max_per_minute": int(
+            session_row.get("apache_404_burst_max_per_minute", 0)
+        ),
         "apache_5xx_burst_max_per_minute": burst_5xx,
         "apache_error_burst_max_per_minute": burst_error,
         "apache_distinct_paths": int(session_row.get("apache_distinct_paths", 0)),
         "apache_rare_path_ratio": path_ratio,
-        "apache_distinct_message_templates": int(session_row.get("apache_distinct_message_templates", 0)),
+        "apache_distinct_message_templates": int(
+            session_row.get("apache_distinct_message_templates", 0)
+        ),
         "apache_rare_error_message_count": rare_count,
         "apache_rare_error_message_ratio": rare_ratio,
         "apache_rare_hour": rare_hour,
-        "apache_error_vs_notice_ratio": float(session_row.get("apache_error_vs_notice_ratio", 0.0)),
-        "apache_high_severity_events": int(session_row.get("apache_high_severity_events", 0)),
-        "apache_high_severity_ratio": float(session_row.get("apache_high_severity_ratio", 0.0)),
+        "apache_error_vs_notice_ratio": error_vs_notice_ratio,
+        "apache_high_severity_events": int(
+            session_row.get("apache_high_severity_events", 0)
+        ),
+        "apache_high_severity_ratio": high_severity_ratio,
         "avg_anomaly_score": anomaly_score,
+        "attack_pattern_reason": attack_pattern_reason,
     }
 
     return IncidentEvidence(
@@ -901,10 +1010,10 @@ def build_apache_incident_evidence(
         model_type=model_type,
         feature_version=get_model_version(),
         threshold_percentile=threshold_percentile,
-        severity="medium" if anomaly_score >= 0.15 else "low",
-        confidence="medium" if (status_5xx > 0 or rare_count > 0 or burst_error > 0) else "low",
-        priority="medium" if anomaly_score >= 0.15 else "low",
-        attack_pattern="apache_anomalous_session",
+        severity=severity,
+        confidence=confidence,
+        priority=priority,
+        attack_pattern=attack_pattern,
         highlights=highlights,
         sessions=[session_ev],
         extra=extra,
