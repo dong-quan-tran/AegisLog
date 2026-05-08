@@ -3,6 +3,7 @@ import json
 from dataclasses import dataclass, asdict
 from typing import List
 
+from aegislog.ai.client import generate_incident_analysis
 from aegislog.parsing.apache_error import parse_error_file
 from aegislog.features.sessions import build_sessions
 from aegislog.ml.pipeline import score_sessions
@@ -132,7 +133,9 @@ def _find_session_by_id(sessions: List[Session], session_id: str) -> Session | N
 def _build_apache_report_payload(df_sorted) -> dict:
     score_col = _score_column(df_sorted)
 
-    top_session_ids = df_sorted.sort_values(score_col, ascending=False)["session_id"].head(5).tolist()
+    top_session_ids = (
+        df_sorted.sort_values(score_col, ascending=False)["session_id"].head(5).tolist()
+    )
 
     payload = {
         "total_sessions_considered": int(len(df_sorted)),
@@ -161,6 +164,46 @@ def _print_apache_report(payload: dict) -> None:
     print("  top_session_ids:")
     for session_id in payload["top_session_ids"]:
         print(f"    - {session_id}")
+
+
+def _build_apache_ai_prompt(evidence) -> dict:
+    extra = evidence.extra or {}
+
+    incident = {
+        "incident_id": evidence.incident_id,
+        "ip": evidence.ip,
+        "severity": evidence.severity,
+        "attack_pattern": evidence.attack_pattern,
+        "primary_user": evidence.user,
+        "total_events": extra.get("error_events", 0),
+        "avg_anomaly_score": extra.get("avg_anomaly_score", 0.0),
+        "status_5xx": extra.get("status_5xx", 0),
+        "apache_5xx_burst_max_per_minute": extra.get("apache_5xx_burst_max_per_minute", 0),
+        "apache_error_burst_max_per_minute": extra.get("apache_error_burst_max_per_minute", 0),
+        "apache_rare_error_message_ratio": extra.get("apache_rare_error_message_ratio", 0.0),
+        "apache_rare_path_ratio": extra.get("apache_rare_path_ratio", 0.0),
+        "apache_high_severity_ratio": extra.get("apache_high_severity_ratio", 0.0),
+    }
+
+    evidence_block = {
+        "highlights": list(evidence.highlights),
+    }
+
+    timeline_summary = (
+        f"Apache error session {evidence.incident_id} with attack pattern "
+        f"'{evidence.attack_pattern}' and severity {evidence.severity}."
+    )
+
+    aggregates = {
+        "total_incidents": 1,
+    }
+
+    return {
+        "incident": incident,
+        "evidence": evidence_block,
+        "timeline_summary": timeline_summary,
+        "aggregates": aggregates,
+    }
 
 
 def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
@@ -232,6 +275,64 @@ def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
         f"rare_path_ratio={extra.get('apache_rare_path_ratio', 0.0):.2f}"
     )
 
+    return 0
+
+
+def _ai_explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
+    if df.empty:
+        print("No sessions found.")
+        return 0
+
+    missing = _ensure_required_columns(df)
+    if missing:
+        print(f"scored data missing required columns: {', '.join(missing)}")
+        return 1
+
+    filtered = _apply_apache_filters(df, args)
+    df_sorted = _sorted_apache_df(filtered, top=max(args.top, 1))
+
+    if df_sorted.empty:
+        print("No sessions found after filtering.")
+        return 0
+
+    if getattr(args, "first", False):
+        index = 0
+    else:
+        index = getattr(args, "index", 0)
+        if index < 0 or index >= len(df_sorted):
+            print(f"Invalid index {index}. There are {len(df_sorted)} session(s) after filtering.")
+            return 1
+
+    row = df_sorted.iloc[index]
+    session_id = row["session_id"]
+    session = _find_session_by_id(sessions, session_id)
+    if session is None:
+        print(f"Session {session_id} not found in built sessions.")
+        return 1
+
+    print(f"AI-explaining Apache session at index {index}: session_id={session_id}")
+
+    evidence = build_apache_incident_evidence(
+        session,
+        row,
+        model_type=args.model_type,
+        threshold_percentile=getattr(args, "threshold_percentile", 99.0),
+    )
+
+    prompt = _build_apache_ai_prompt(evidence)
+    analysis = generate_incident_analysis(prompt)
+
+    payload = {
+        "incident_id": evidence.incident_id,
+        "log_type": evidence.log_type,
+        "ip": evidence.ip,
+        "severity": evidence.severity,
+        "attack_pattern": evidence.attack_pattern,
+        "ai_analysis": analysis,
+    }
+
+    data = json.dumps(payload, indent=2)
+    write_output(data, getattr(args, "output", None))
     return 0
 
 
@@ -308,6 +409,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explain a single suspicious Apache session with evidence-style output.",
     )
     parser.add_argument(
+        "--ai-explain",
+        action="store_true",
+        help="Generate AI-assisted structured analysis for a single suspicious Apache session.",
+    )
+    parser.add_argument(
         "--report",
         action="store_true",
         help="Show an aggregate report over the top suspicious Apache sessions.",
@@ -316,12 +422,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--index",
         type=int,
         default=0,
-        help="Zero-based index into the sorted list of sessions to explain (used with --explain).",
+        help="Zero-based index into the sorted list of sessions to explain (used with --explain/--ai-explain).",
     )
     parser.add_argument(
         "--first",
         action="store_true",
-        help="Explain the first session after sorting (used with --explain).",
+        help="Explain the first session after sorting (used with --explain/--ai-explain).",
     )
     parser.add_argument(
         "--min-score",
@@ -346,7 +452,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Only include sessions with at least this many Apache error events.",
     )
-    add_json_output_args(parser, "Apache sessions, explanation, or report")
+    add_json_output_args(parser, "Apache sessions, explanation, AI analysis, or report")
     return parser
 
 
@@ -356,12 +462,16 @@ def main(argv: List[str] | None = None) -> int:
 
     sessions, df = load_apache_sessions_for_cli(args)
 
-    if args.explain and args.report:
-        print("Choose only one of --explain or --report.")
+    mode_count = sum(bool(x) for x in [args.explain, args.ai_explain, args.report])
+    if mode_count > 1:
+        print("Choose only one of --explain, --ai-explain, or --report.")
         return 1
 
     if args.explain:
         return _explain_apache_session(args, sessions, df)
+
+    if args.ai_explain:
+        return _ai_explain_apache_session(args, sessions, df)
 
     if args.report:
         return _report_apache_sessions(args, df)
