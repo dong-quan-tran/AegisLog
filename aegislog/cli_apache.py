@@ -111,7 +111,9 @@ def _apply_apache_filters(df, args: argparse.Namespace):
         filtered = filtered[filtered["apache_rare_hour"] > 0]
 
     if getattr(args, "min_5xx_burst", None) is not None:
-        filtered = filtered[filtered["apache_5xx_burst_max_per_minute"] >= args.min_5xx_burst]
+        filtered = filtered[
+            filtered["apache_5xx_burst_max_per_minute"] >= args.min_5xx_burst
+        ]
 
     if getattr(args, "min_error_events", None) is not None:
         filtered = filtered[filtered["error_events"] >= args.min_error_events]
@@ -141,11 +143,21 @@ def _build_apache_report_payload(df_sorted) -> dict:
     payload = {
         "total_sessions_considered": int(len(df_sorted)),
         "rare_hour_sessions": int((df_sorted["apache_rare_hour"] > 0).sum()),
-        "sessions_with_5xx_burst": int((df_sorted["apache_5xx_burst_max_per_minute"] >= 5).sum()),
-        "sessions_with_error_burst": int((df_sorted["apache_error_burst_max_per_minute"] >= 10).sum()),
-        "sessions_with_rare_templates": int((df_sorted["apache_rare_error_message_ratio"] > 0.3).sum()),
-        "sessions_with_high_severity_ratio": int((df_sorted["apache_high_severity_ratio"] > 0.1).sum()),
-        "sessions_with_error_dominance": int((df_sorted["apache_error_vs_notice_ratio"] > 2.0).sum()),
+        "sessions_with_5xx_burst": int(
+            (df_sorted["apache_5xx_burst_max_per_minute"] >= 5).sum()
+        ),
+        "sessions_with_error_burst": int(
+            (df_sorted["apache_error_burst_max_per_minute"] >= 10).sum()
+        ),
+        "sessions_with_rare_templates": int(
+            (df_sorted["apache_rare_error_message_ratio"] > 0.3).sum()
+        ),
+        "sessions_with_high_severity_ratio": int(
+            (df_sorted["apache_high_severity_ratio"] > 0.1).sum()
+        ),
+        "sessions_with_error_dominance": int(
+            (df_sorted["apache_error_vs_notice_ratio"] > 2.0).sum()
+        ),
         "total_error_events": int(df_sorted["error_events"].fillna(0).sum()),
         "top_session_ids": top_session_ids,
     }
@@ -159,7 +171,9 @@ def _print_apache_report(payload: dict) -> None:
     print(f"  sessions_with_5xx_burst={payload['sessions_with_5xx_burst']}")
     print(f"  sessions_with_error_burst={payload['sessions_with_error_burst']}")
     print(f"  sessions_with_rare_templates={payload['sessions_with_rare_templates']}")
-    print(f"  sessions_with_high_severity_ratio={payload['sessions_with_high_severity_ratio']}")
+    print(
+        f"  sessions_with_high_severity_ratio={payload['sessions_with_high_severity_ratio']}"
+    )
     print(f"  sessions_with_error_dominance={payload['sessions_with_error_dominance']}")
     print(f"  total_error_events={payload['total_error_events']}")
     print("  top_session_ids:")
@@ -167,37 +181,50 @@ def _print_apache_report(payload: dict) -> None:
         print(f"    - {session_id}")
 
 
-def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
+def _select_apache_session(args: argparse.Namespace, sessions, df):
     if df.empty:
         print("No sessions found.")
-        return 0
+        return None, None, 0
 
     missing = _ensure_required_columns(df)
     if missing:
         print(f"scored data missing required columns: {', '.join(missing)}")
-        return 1
+        return None, None, 1
 
     filtered = _apply_apache_filters(df, args)
     df_sorted = _sorted_apache_df(filtered, top=max(args.top, 1))
 
     if df_sorted.empty:
         print("No sessions found after filtering.")
-        return 0
+        return None, None, 0
 
     if getattr(args, "first", False):
         index = 0
     else:
         index = getattr(args, "index", 0)
         if index < 0 or index >= len(df_sorted):
-            print(f"Invalid index {index}. There are {len(df_sorted)} session(s) after filtering.")
-            return 1
+            print(
+                f"Invalid index {index}. There are {len(df_sorted)} session(s) after filtering."
+            )
+            return None, None, 1
 
     row = df_sorted.iloc[index]
     session_id = row["session_id"]
     session = _find_session_by_id(sessions, session_id)
     if session is None:
         print(f"Session {session_id} not found in built sessions.")
-        return 1
+        return None, None, 1
+
+    return session, row, None
+
+
+def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
+    session, row, early_rc = _select_apache_session(args, sessions, df)
+    if early_rc is not None:
+        return early_rc
+
+    session_id = row["session_id"]
+    index = 0 if getattr(args, "first", False) else getattr(args, "index", 0)
 
     print(f"Explaining Apache session at index {index}: session_id={session_id}")
 
@@ -240,36 +267,12 @@ def _explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
 
 
 def _ai_explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
-    if df.empty:
-        print("No sessions found.")
-        return 0
+    session, row, early_rc = _select_apache_session(args, sessions, df)
+    if early_rc is not None:
+        return early_rc
 
-    missing = _ensure_required_columns(df)
-    if missing:
-        print(f"scored data missing required columns: {', '.join(missing)}")
-        return 1
-
-    filtered = _apply_apache_filters(df, args)
-    df_sorted = _sorted_apache_df(filtered, top=max(args.top, 1))
-
-    if df_sorted.empty:
-        print("No sessions found after filtering.")
-        return 0
-
-    if getattr(args, "first", False):
-        index = 0
-    else:
-        index = getattr(args, "index", 0)
-        if index < 0 or index >= len(df_sorted):
-            print(f"Invalid index {index}. There are {len(df_sorted)} session(s) after filtering.")
-            return 1
-
-    row = df_sorted.iloc[index]
     session_id = row["session_id"]
-    session = _find_session_by_id(sessions, session_id)
-    if session is None:
-        print(f"Session {session_id} not found in built sessions.")
-        return 1
+    index = 0 if getattr(args, "first", False) else getattr(args, "index", 0)
 
     print(f"AI-explaining Apache session at index {index}: session_id={session_id}")
 
