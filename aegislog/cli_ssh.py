@@ -19,7 +19,7 @@ from aegislog.ai.ai import (
 )
 
 
-from aegislog.ai.prompting import build_incident_prompt
+from aegislog.ai.prompts import build_incident_prompt
 from aegislog.ai.client import generate_incident_analysis, LLMError
 
 
