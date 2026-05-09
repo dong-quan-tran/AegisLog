@@ -1484,3 +1484,32 @@ Verified that the mock AI analysis path is now schema-stable and that playbook l
 Extending explain support to Apache incidents.
 
 Swapping in a real LLM backend later with less risk of schema drift.
+
+Progress log: 05/08/2026
+Implemented Apache incident classification and evidence:
+
+Extended incidents.py with Apache-specific attack patterns, severity/confidence logic, and build_apache_incident_evidence.
+
+Ensured Apache incidents now emit structured attack_pattern values like apache_error_spike plus rich extra metrics for downstream AI.
+
+Added and fixed tests around Apache evidence and AI:
+
+Created tests/test_apache_incident_evidence.py and aligned the Session fixture with Session(user_agent, source_set, ...).
+
+Added tests/test_apache_ai_prompt.py to validate the incident-analysis prompt built from Apache evidence.
+
+Added CLI-level tests to exercise --ai-explain, mocking loaders, evidence, and AI client to verify JSON output shape and mode exclusivity.
+
+Built a shared AI prompt builder:
+
+Introduced aegislog/ai/prompts.py with build_incident_analysis_prompt, plus Apache/SSH/generic helpers, centralizing prompt shaping for all log types.
+
+Refactored the Apache CLI to use the shared pipeline:
+
+Updated cli_apache.py to:
+
+Support --ai-explain using build_incident_analysis_prompt + generate_incident_analysis.
+
+Factor out session selection into _select_apache_session.
+
+Keep --explain and --report behavior intact while reusing shared helpers.
