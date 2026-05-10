@@ -1,72 +1,66 @@
-from datetime import datetime
-
-import pandas as pd
-
-from aegislog.features.sessions import Session
-from aegislog.incidents import build_apache_incident_evidence
-from aegislog.cli_apache import _build_apache_ai_prompt
+from aegislog.ai.prompts import build_incident_analysis_prompt
+from aegislog.incident.evidence import IncidentEvidence, SessionEvidence
 
 
-def make_session() -> Session:
-    return Session(
-        session_id="apache-session-ai-1",
+def test_apache_ai_prompt_contains_expected_fields() -> None:
+    evidence = IncidentEvidence(
+        incident_id="apache:apache-session-1",
+        log_type="apache_error",
         ip="203.0.113.20",
         user=None,
-        user_agent=None,
-        source_set=set(),
-        start_time=datetime(2026, 5, 8, 11, 0, 0),
-        end_time=datetime(2026, 5, 8, 11, 5, 0),
-        events=[],
-    )
-
-
-def make_row() -> pd.Series:
-    return pd.Series(
-        {
-            "anomaly_score": 0.25,
-            "status_5xx": 10,
+        model_type="iforest",
+        feature_version="test-model",
+        threshold_percentile=99.0,
+        severity="medium",
+        confidence="medium",
+        priority="medium",
+        attack_pattern="apache_error_spike",
+        highlights=["5xx responses were bursty."],
+        sessions=[
+            SessionEvidence(
+                session_id="apache-session-1",
+                anomaly_score=0.91,
+                start_time="2026-05-08T11:00:00",
+                end_time="2026-05-08T11:05:00",
+                ip="203.0.113.20",
+                user=None,
+                auth_failed=0,
+                auth_success=0,
+                event_count=20,
+                event_type="apache_session",
+                notes=["error spike within a single minute"],
+            )
+        ],
+        extra={
             "error_events": 18,
-            "notice_events": 5,
-            "apache_5xx_streak_max": 0,
-            "apache_404_burst_max_per_minute": 0,
+            "avg_anomaly_score": 0.91,
+            "status_5xx": 10,
             "apache_5xx_burst_max_per_minute": 6,
             "apache_error_burst_max_per_minute": 12,
-            "apache_distinct_paths": 4,
-            "apache_rare_path_ratio": 0.2,
-            "apache_distinct_message_templates": 3,
-            "apache_rare_error_message_count": 2,
             "apache_rare_error_message_ratio": 0.25,
-            "apache_rare_hour": 0,
-            "apache_error_vs_notice_ratio": 3.0,
-            "apache_high_severity_events": 1,
+            "apache_rare_path_ratio": 0.20,
             "apache_high_severity_ratio": 0.15,
-            "event_count": 20,
-        }
+        },
     )
 
+    prompt = build_incident_analysis_prompt(evidence)
 
-def test_build_apache_ai_prompt_shape_and_fields() -> None:
-    session = make_session()
-    row = make_row()
+    assert prompt["incident"]["incident_id"] == "apache:apache-session-1"
+    assert prompt["incident"]["ip"] == "203.0.113.20"
+    assert prompt["incident"]["severity"] == "medium"
+    assert prompt["incident"]["attack_pattern"] == "apache_error_spike"
+    assert prompt["incident"]["primary_user"] is None
 
-    evidence = build_apache_incident_evidence(session, row)
-    prompt = _build_apache_ai_prompt(evidence)
+    assert prompt["incident"]["total_events"] == 18
+    assert prompt["incident"]["avg_anomaly_score"] == 0.91
+    assert prompt["incident"]["status_5xx"] == 10
+    assert prompt["incident"]["apache_5xx_burst_max_per_minute"] == 6
+    assert prompt["incident"]["apache_error_burst_max_per_minute"] == 12
+    assert prompt["incident"]["apache_rare_error_message_ratio"] == 0.25
+    assert prompt["incident"]["apache_rare_path_ratio"] == 0.20
+    assert prompt["incident"]["apache_high_severity_ratio"] == 0.15
 
-    assert "incident" in prompt
-    assert "evidence" in prompt
-    assert "timeline_summary" in prompt
-    assert "aggregates" in prompt
-
-    incident = prompt["incident"]
-    assert incident["incident_id"] == evidence.incident_id
-    assert incident["ip"] == evidence.ip
-    assert incident["attack_pattern"] == evidence.attack_pattern
-    assert incident["severity"] == evidence.severity
-    assert incident["total_events"] == evidence.extra["error_events"]
-    assert incident["apache_5xx_burst_max_per_minute"] == evidence.extra["apache_5xx_burst_max_per_minute"]
-
-    evidence_block = prompt["evidence"]
-    assert evidence_block["highlights"] == evidence.highlights
-
+    assert prompt["evidence"]["highlights"] == ["5xx responses were bursty."]
     assert prompt["aggregates"]["total_incidents"] == 1
-    assert "Apache error session" in prompt["timeline_summary"]
+    assert "timeline_summary" in prompt
+    assert "apache_error_spike" in prompt["timeline_summary"]
