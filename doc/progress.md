@@ -1513,3 +1513,32 @@ Support --ai-explain using build_incident_analysis_prompt + generate_incident_an
 Factor out session selection into _select_apache_session.
 
 Keep --explain and --report behavior intact while reusing shared helpers.
+
+
+Progress log: 05/09/2026
+Refactored the AI workflow to use the shared prompt builder, replacing Apache-specific prompt assumptions with build_incident_analysis_prompt across the newer analysis path.
+
+Added and fixed AI-focused tests for SSH and Apache CLI flows, including ai-explain, legacy explain --use-llm, report output, prompt construction, and AI payload validation.
+
+Updated older Apache prompt tests to match the new shared prompt contract instead of the removed Apache-only helper.
+
+Tests completed
+Passed targeted tests for SSH report, Apache report, AI prompt mapping, Apache AI explain, and AI client validation during today’s iteration.
+
+Fixed several failure-path tests by making the fake evidence objects match the real prompt-builder contract, including fields like log_type, user, and extra.
+
+Identified one behavior gap: Apache AI failure currently propagates LLMError, while SSH catches it and degrades cleanly.
+
+Repo state
+Prepared separate commit messages for the new and updated AI-related test groups so they can be committed cleanly by area.
+
+Confirmed that __pycache__ files should not be committed and only the Python test files should be staged.
+
+Hit a network-level GitHub push failure over HTTPS port 443, which points to connectivity or proxy issues rather than a repo/test problem.
+
+Next session
+Make Apache AI error handling match SSH by catching LLMError in cli_apache.py instead of letting it propagate.
+
+Run the full pytest suite again after that consistency fix and commit the remaining AI-related test changes.
+
+Clean up README or CLI help text so explain versus ai-explain is clearly documented for users.
