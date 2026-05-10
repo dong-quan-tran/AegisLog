@@ -114,6 +114,7 @@ def test_cli_apache_ai_explain_json(monkeypatch, tmp_path) -> None:
     assert payload["incident_id"] == "apache:apache-session-1"
     assert payload["attack_pattern"] == "apache_error_spike"
     assert payload["severity"] == "medium"
+    assert payload["log_type"] == "apache_error"
     assert "ai_analysis" in payload
     assert payload["ai_analysis"]["playbook_slug"] == "apache_error_spike"
 
