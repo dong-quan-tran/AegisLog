@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
 from typing import Any, Dict, List, Optional, TypedDict
+
+import requests
 
 from aegislog.ai.playbooks import Playbook, lookup_playbook
 
@@ -34,11 +38,26 @@ def generate_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
     """
     Core AI entrypoint for incident analysis.
 
-    For now this uses a deterministic mock backend that constructs a
-    structured explanation from the prompt and playbooks. Later, this
-    function can route to a real LLM (Gemini, DeepSeek, etc.) while
-    keeping the same return shape.
+    Backends:
+    - mock (default): deterministic, provider-free explanation.
+    - ollama: use a local Ollama model via HTTP API.
+
+    Backend selection is controlled by:
+    - AEGISLOG_AI_BACKEND = "mock" | "ollama"
+    - AEGISLOG_OLLAMA_MODEL = "<model name>" (default: "llama3")
     """
+    backend = os.getenv("AEGISLOG_AI_BACKEND", "mock").strip().lower()
+
+    if backend == "ollama":
+        try:
+            analysis = _ollama_incident_analysis(prompt)
+            return validate_ai_analysis(analysis)
+        except Exception as exc:
+            # Fallback to mock if Ollama is unavailable or misconfigured.
+            # Re-raise as LLMError so CLI can handle it consistently.
+            raise LLMError(f"Ollama backend failed: {exc}") from exc
+
+    # Default: deterministic mock backend
     analysis = _mock_incident_analysis(prompt)
     return validate_ai_analysis(analysis)
 
@@ -94,6 +113,98 @@ def validate_ai_analysis(payload: Dict[str, Any]) -> IncidentAIAnalysis:
         next_steps=payload["next_steps"],
         playbook_slug=payload["playbook_slug"],
         playbook_notes=payload["playbook_notes"],
+    )
+
+
+def _ollama_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
+    """
+    Use a local Ollama model to generate incident analysis.
+
+    Expects Ollama to be running locally (default: http://localhost:11434)
+    and a model pulled (default: `llama3`).
+
+    Uses the /api/chat endpoint with a system prompt + user content,
+    and asks the model to return JSON matching IncidentAIAnalysis.
+    """
+    model = os.getenv("AEGISLOG_OLLAMA_MODEL", "llama3").strip() or "llama3"
+    host = os.getenv("AEGISLOG_OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    url = f"{host}/api/chat"
+
+    system_prompt = (
+        "You are an incident response assistant for SSH and Apache logs. "
+        "You receive structured incident evidence (JSON) and must respond "
+        "with a single JSON object that matches this Python TypedDict schema:\n\n"
+        "IncidentAIAnalysis = {\n"
+        "  summary: str,\n"
+        "  evidence: List[str],\n"
+        "  hypothesis: str,\n"
+        "  caveats: List[str],\n"
+        "  next_steps: List[str],\n"
+        "  playbook_slug: Optional[str],\n"
+        "  playbook_notes: Optional[str],\n"
+        "}\n\n"
+        "Rules:\n"
+        "- Respond with JSON only, no extra text.\n"
+        "- Use short, clear sentences.\n"
+        "- Summaries and hypotheses should focus on what is most likely happening.\n"
+        "- Next steps must be concrete investigation or response actions.\n"
+    )
+
+    user_content = (
+        "Here is the structured incident payload:\n"
+        f"{json.dumps(prompt, ensure_ascii=False, indent=2)}\n\n"
+        "Return ONLY the IncidentAIAnalysis JSON object."
+    )
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        # Ask Ollama to produce JSON output; newer versions support format='json'.
+        "stream": False,
+        "format": "json",
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=60)
+    except Exception as exc:
+        raise LLMError(f"Failed to reach Ollama at {host}: {exc}") from exc
+
+    if response.status_code != 200:
+        raise LLMError(
+            f"Ollama returned HTTP {response.status_code}: {response.text[:200]}"
+        )
+
+    try:
+        data = response.json()
+    except Exception as exc:
+        raise LLMError(f"Could not parse Ollama JSON response: {exc}") from exc
+
+    # For chat format='json', response["message"]["content"] should already be parsed JSON
+    message = data.get("message") or {}
+    content = message.get("content")
+    if isinstance(content, dict):
+        raw = content
+    else:
+        # Fallback: content is a JSON string.
+        try:
+            raw = json.loads(content or "{}")
+        except Exception as exc:
+            raise LLMError(f"Ollama content was not valid JSON: {exc}") from exc
+
+    if not isinstance(raw, dict):
+        raise LLMError("Ollama analysis must be a JSON object.")
+
+    return IncidentAIAnalysis(
+        summary=str(raw.get("summary") or "").strip(),
+        evidence=list(raw.get("evidence") or []),
+        hypothesis=str(raw.get("hypothesis") or "").strip(),
+        caveats=list(raw.get("caveats") or []),
+        next_steps=list(raw.get("next_steps") or []),
+        playbook_slug=raw.get("playbook_slug"),
+        playbook_notes=raw.get("playbook_notes"),
     )
 
 
