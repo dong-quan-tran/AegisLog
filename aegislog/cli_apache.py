@@ -3,14 +3,13 @@ import json
 from dataclasses import dataclass, asdict
 from typing import List
 
-from aegislog.ai.client import generate_incident_analysis
+from aegislog.ai.client import generate_incident_analysis, LLMError
 from aegislog.ai.prompts import build_incident_analysis_prompt
 from aegislog.parsing.apache_error import parse_error_file
-from aegislog.features.sessions import build_sessions
+from aegislog.features.sessions import build_sessions, Session
 from aegislog.ml.pipeline import score_sessions
 from aegislog.cli_common import resolve_model_path, add_json_output_args, write_output
 from aegislog.incidents import build_apache_incident_evidence
-from aegislog.features.sessions import Session
 
 
 @dataclass
@@ -284,7 +283,12 @@ def _ai_explain_apache_session(args: argparse.Namespace, sessions, df) -> int:
     )
 
     prompt = build_incident_analysis_prompt(evidence)
-    analysis = generate_incident_analysis(prompt)
+
+    try:
+        analysis = generate_incident_analysis(prompt)
+    except LLMError as exc:
+        print(f"AI analysis failed: {exc}")
+        return 1
 
     payload = {
         "incident_id": evidence.incident_id,
