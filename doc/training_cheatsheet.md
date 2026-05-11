@@ -350,6 +350,61 @@ aegislog explain \
   `aegislog explain <LOGFILE> --log-type ssh_auth --model-type iforest --model-path <MODELFILE> --use-llm --format json --output explain_ai.json`
 
 
+## 9. Apache AI explain and trained models
+
+The Apache AI explain flow (`python -m aegislog.cli_apache ... --ai-explain`) builds on the **same trained Apache models** used for `analyze` and `report`, similar to the SSH side:
+
+1. The model scores Apache sessions from the error log.
+2. Suspicious sessions are selected using the same filters you would use for reports (score thresholds, rare hour, 5xx bursts, etc.).
+3. Each selected session is converted into structured Apache-specific `IncidentEvidence` (burst metrics, rare templates, 5xx density, unusual hours, etc.).
+4. An internal AI analysis layer consumes this structured evidence (not raw log lines) to produce:
+   - a natural-language summary of the behavior,
+   - a hypothesis about what might be happening,
+   - caveats and limitations,
+   - suggested next steps for investigation or mitigation.
+
+Because the AI analysis is driven by features and anomaly scores rather than free-form log text, better Apache models and features directly improve AI explain quality.
+
+To use a specific trained Apache model with AI explain:
+
+```bash
+python -m aegislog.cli_apache \
+  data/loghub/Apache.log \
+  --model-type iforest \
+  --model-path models/log_anomaly_iforest_apache.joblib \
+  --ai-explain \
+  --first \
+  --format json \
+  --output apache_explain_ai.json
+```
+
+If the AI analysis layer is unavailable or fails (for example, due to upstream API errors), the Apache CLI will:
+
+- print a clear error message (e.g. `AI analysis failed: <reason>`), and  
+- return a non-zero exit code,  
+
+while leaving the non-AI commands (`--explain`, `--report`, plain top-session listing) unchanged.
+
+---
+
+## 10. When to use explain vs AI explain
+
+For both SSH and Apache workflows:
+
+- Use **`--explain`** (SSH `explain` CLI or Apache `--explain`) when you want:
+  - deterministic, non-AI evidence output,
+  - direct visibility into anomaly scores, ratios, bursts, and other features,
+  - behavior that does not depend on any external AI service.
+
+- Use **AI explain**:
+  - SSH: `--use-llm` with `aegislog explain`  
+  - Apache: `--ai-explain` with `python -m aegislog.cli_apache`  
+  when you want:
+  - structured, AI-generated narrative analysis,
+  - hypotheses and recommended next steps derived from the evidence,
+  - richer, human-readable summaries for investigations or demos.
+
+In both cases, the underlying anomaly detection model and feature engineering are the same; AI explain is an additional layer on top of the trained models, not a replacement for them.
 
 ---
 

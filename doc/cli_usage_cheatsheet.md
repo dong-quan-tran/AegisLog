@@ -19,10 +19,11 @@ python -m aegislog.cli explain data/loghub/SSH.log --log-type ssh_auth --min-sev
 # 4) See the top suspicious Apache error sessions via main CLI
 python -m aegislog.cli analyze data/loghub/Apache.log --log-type apache_error --top 10
 
-# 5) Use the dedicated Apache CLI to inspect sessions, explain one, and see a report
+# 5) Use the dedicated Apache CLI to inspect sessions, explain one, see a report, or get AI analysis
 python -m aegislog.cli_apache data/loghub/Apache.log -n 20
 python -m aegislog.cli_apache data/loghub/Apache.log --explain --first
 python -m aegislog.cli_apache data/loghub/Apache.log --report
+python -m aegislog.cli_apache data/loghub/Apache.log --ai-explain --first --format json --output apache_explain_ai.json
 ```
 
 
@@ -414,6 +415,32 @@ Produces a single evidence object with:
 - `highlights`,
 - `sessions` (one session with Apache-focused evidence),
 - `extra` (raw metrics used to build the explanation).
+
+### AI-augmented Apache explain (structured analysis)
+
+```bash
+# Write AI-augmented Apache explain JSON to a file
+python -m aegislog.cli_apache \
+  data/loghub/Apache.log \
+  --ai-explain \
+  --first \
+  --format json \
+  --output apache_explain_ai.json
+```
+
+This uses the same Apache anomaly model and evidence as `--explain`, but adds an AI-generated `ai_analysis` object that includes:
+
+- a short natural-language summary,
+- evidence-style bullet points tied to Apache metrics (bursts, rare templates, unusual hours),
+- a hypothesis about what the pattern might indicate,
+- caveats and recommended next steps.
+
+If AI analysis fails (for example, due to an upstream error), the command will:
+
+- print a clear `AI analysis failed: ...` message, and
+- exit with a non-zero status code,
+
+while leaving the regular `--explain` and `--report` behavior unchanged.
 
 ### Apache report (aggregate metrics)
 
