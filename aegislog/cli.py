@@ -22,6 +22,10 @@ from aegislog.incidents_generic import (
 )
 from aegislog.ai.prompts import build_incident_analysis_prompt
 from aegislog.ai.client import generate_incident_analysis, LLMError
+from aegislog.adapters.ssh import (
+    load_ssh_normalized_events,
+    summarize_ssh_normalized_events,
+)
 
 __all__ = [
     "write_output",
@@ -45,6 +49,7 @@ def cmd_examples(args: argparse.Namespace) -> None:
     print("  aegislog incidents data/loghub/SSH.log --log-type ssh_auth")
     print("  aegislog explain data/loghub/SSH.log --log-type ssh_auth --index 0")
     print("  aegislog normalize data/sample_generic.jsonl")
+    print("  aegislog normalize-ssh data/loghub/SSH.log")
     print("  aegislog generic-incidents data/sample_generic.jsonl")
     print("  aegislog generic-explain data/sample_generic.jsonl --index 0 --use-ai")
 
@@ -99,6 +104,42 @@ def cmd_normalize(args: argparse.Namespace) -> int:
     for idx, event in enumerate(preview):
         print(f"\n[{idx}]")
         print(json.dumps(event, indent=2))
+
+    return 0
+
+
+def cmd_normalize_ssh(args: argparse.Namespace) -> int:
+    events = load_ssh_normalized_events(args.path)
+    preview = [event.to_dict() for event in events[: args.top]]
+    summary = summarize_ssh_normalized_events(events)
+
+    payload = {
+        "path": args.path,
+        "source_type": "ssh",
+        "summary": summary,
+        "preview": preview,
+    }
+
+    if args.format == "json":
+        text = json.dumps(payload, indent=2)
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(text + "\n")
+        else:
+            print(text)
+        return 0
+
+    print(f"Normalized {summary['total_events']} SSH event(s) from {args.path}")
+    print(f"Previewing first {len(preview)} event(s)")
+    print(f"Severity counts: {summary['severity_counts']}")
+    print(f"Event action counts: {summary['event_action_counts']}")
+    print(f"Distinct users: {summary['distinct_users']}")
+    print(f"Distinct source IPs: {summary['distinct_src_ips']}")
+
+    for idx, item in enumerate(preview):
+        print()
+        print(f"[{idx}]")
+        print(json.dumps(item, indent=2))
 
     return 0
 
@@ -268,6 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  aegislog explain data/loghub/SSH.log --index 0 --format json --output explain.json\n"
             "  aegislog ai-explain data/loghub/SSH.log --index 0 --format json --output ai-explain.json\n"
             "  aegislog normalize data/sample_generic.jsonl\n"
+            "  aegislog normalize-ssh data/loghub/SSH.log\n"
             "  aegislog generic-incidents data/sample_generic.jsonl\n"
             "  aegislog generic-explain data/sample_generic.jsonl --index 0 --use-ai\n"
         ),
@@ -304,6 +346,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to write JSON output instead of stdout.",
     )
     p_normalize.set_defaults(func=cmd_normalize)
+
+    p_norm_ssh = subparsers.add_parser(
+        "normalize-ssh",
+        help="Normalize SSH auth logs into the common event schema.",
+    )
+    p_norm_ssh.add_argument("path", help="Path to SSH auth log file.")
+    p_norm_ssh.add_argument(
+        "--top",
+        type=int,
+        default=5,
+        help="Number of normalized events to preview.",
+    )
+    p_norm_ssh.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format.",
+    )
+    p_norm_ssh.add_argument(
+        "--output",
+        help="Optional path to write JSON output instead of stdout.",
+    )
+    p_norm_ssh.set_defaults(func=cmd_normalize_ssh)
 
     p_generic_incidents = subparsers.add_parser(
         "generic-incidents",
