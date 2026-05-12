@@ -8,12 +8,20 @@ from aegislog.cli_ssh import (
     cmd_incidents,
     cmd_explain,
     cmd_report,
+    cmd_ai_explain,
     register_incidents_parser,
     register_explain_parser,
     register_report_parser,
+    register_ai_explain_parser,
 )
 from aegislog.parsing.generic import load_generic_jsonl, summarize_normalized_events
-from aegislog.incidents_generic import group_generic_events_to_incidents
+from aegislog.incidents_generic import (
+    group_generic_events_to_incidents,
+    group_generic_events_to_incident_bundles,
+    build_generic_incident_evidence,
+)
+from aegislog.ai.prompts import build_incident_analysis_prompt
+from aegislog.ai.client import generate_incident_analysis, LLMError
 
 __all__ = [
     "write_output",
@@ -25,6 +33,7 @@ __all__ = [
     "cmd_train",
     "cmd_incidents",
     "cmd_explain",
+    "cmd_ai_explain",
     "cmd_report",
     "main",
 ]
@@ -35,6 +44,9 @@ def cmd_examples(args: argparse.Namespace) -> None:
     print("  aegislog analyze data/loghub/SSH.log --log-type ssh_auth --profile ssh")
     print("  aegislog incidents data/loghub/SSH.log --log-type ssh_auth")
     print("  aegislog explain data/loghub/SSH.log --log-type ssh_auth --index 0")
+    print("  aegislog normalize data/sample_generic.jsonl")
+    print("  aegislog generic-incidents data/sample_generic.jsonl")
+    print("  aegislog generic-explain data/sample_generic.jsonl --index 0 --use-ai")
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -90,6 +102,7 @@ def cmd_normalize(args: argparse.Namespace) -> int:
 
     return 0
 
+
 def cmd_generic_incidents(args: argparse.Namespace) -> int:
     events, errors = load_generic_jsonl(args.path)
     incidents = group_generic_events_to_incidents(
@@ -137,6 +150,109 @@ def cmd_generic_incidents(args: argparse.Namespace) -> int:
 
     return 0
 
+
+def cmd_generic_explain(args: argparse.Namespace) -> int:
+    events, errors = load_generic_jsonl(args.path)
+    bundles = group_generic_events_to_incident_bundles(
+        events,
+        window_minutes=args.window_minutes,
+    )
+
+    if not bundles:
+        print("No generic incidents found.")
+        return 0
+
+    if args.first:
+        bundle = bundles[0]
+        index = 0
+    else:
+        if args.index < 0 or args.index >= len(bundles):
+            print(
+                f"Invalid index {args.index}. There are {len(bundles)} generic incident(s)."
+            )
+            return 1
+        bundle = bundles[args.index]
+        index = args.index
+
+    incident = bundle.incident
+    evidence = build_generic_incident_evidence(
+        incident,
+        bundle.events,
+        input_format=args.input_format,
+        window_minutes=args.window_minutes,
+    )
+
+    ai_analysis = None
+    if args.use_ai:
+        try:
+            prompt = build_incident_analysis_prompt(evidence)
+            ai_analysis = generate_incident_analysis(prompt)
+        except LLMError as e:
+            print(f"  [AI analysis unavailable] {e}")
+
+    payload = {
+        "path": args.path,
+        "input_format": args.input_format,
+        "window_minutes": args.window_minutes,
+        "selected_index": index,
+        "incident": incident.to_dict(),
+        "incident_evidence": evidence.to_dict(),
+        "parse_errors": errors,
+    }
+    if ai_analysis is not None:
+        payload["ai_analysis"] = ai_analysis
+
+    if args.format == "json":
+        write_output(json.dumps(payload, indent=2), getattr(args, "output", None))
+        return 0
+
+    print(f"Explaining generic incident at index {index}: {incident.incident_id}")
+    print(
+        f"  priority={incident.priority} severity={incident.severity} "
+        f"confidence={incident.confidence} pattern={incident.attack_pattern} "
+        f"events={incident.event_count} errors={incident.error_count} warnings={incident.warning_count}"
+    )
+    print(f"  group_key={incident.group_key}")
+    print(f"  summary_title={incident.summary_title}")
+    print(f"  summary_description={incident.summary_description}")
+
+    if errors:
+        print(f"  parse_errors={len(errors)}")
+
+    if ai_analysis is not None:
+        print("  ai_summary_begin")
+        for line in ai_analysis["summary"].splitlines():
+            print(f"    {line}")
+        print("  ai_summary_end")
+
+        print("  ai_evidence_begin")
+        for item in ai_analysis["evidence"]:
+            print(f"    - {item}")
+        print("  ai_evidence_end")
+
+        print("  ai_hypothesis_begin")
+        for line in ai_analysis["hypothesis"].splitlines():
+            print(f"    {line}")
+        print("  ai_hypothesis_end")
+
+        print("  ai_caveats_begin")
+        for item in ai_analysis["caveats"]:
+            print(f"    - {item}")
+        print("  ai_caveats_end")
+
+        print("  ai_next_steps_begin")
+        for item in ai_analysis["next_steps"]:
+            print(f"    - {item}")
+        print("  ai_next_steps_end")
+
+        if ai_analysis.get("playbook_slug"):
+            print(f"  playbook_slug={ai_analysis['playbook_slug']}")
+        if ai_analysis.get("playbook_notes"):
+            print(f"  playbook_notes={ai_analysis['playbook_notes']}")
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="aegislog",
@@ -150,7 +266,10 @@ def build_parser() -> argparse.ArgumentParser:
             "  aegislog analyze data/loghub/SSH.log --log-type ssh_auth --format json --output analyze.json\n"
             "  aegislog incidents data/loghub/SSH.log --top 3 --format json --output incidents.json\n"
             "  aegislog explain data/loghub/SSH.log --index 0 --format json --output explain.json\n"
+            "  aegislog ai-explain data/loghub/SSH.log --index 0 --format json --output ai-explain.json\n"
             "  aegislog normalize data/sample_generic.jsonl\n"
+            "  aegislog generic-incidents data/sample_generic.jsonl\n"
+            "  aegislog generic-explain data/sample_generic.jsonl --index 0 --use-ai\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -185,6 +304,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to write JSON output instead of stdout.",
     )
     p_normalize.set_defaults(func=cmd_normalize)
+
     p_generic_incidents = subparsers.add_parser(
         "generic-incidents",
         help="Group normalized generic JSONL events into simple generic incidents.",
@@ -219,7 +339,52 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to write JSON output instead of stdout.",
     )
     p_generic_incidents.set_defaults(func=cmd_generic_incidents)
-    
+
+    p_generic_explain = subparsers.add_parser(
+        "generic-explain",
+        help="Generate structured explanation for a single generic incident.",
+    )
+    p_generic_explain.add_argument("path", help="Path to the input log file.")
+    p_generic_explain.add_argument(
+        "--input-format",
+        choices=["jsonl"],
+        default="jsonl",
+        help="Input format for generic logs.",
+    )
+    p_generic_explain.add_argument(
+        "--window-minutes",
+        type=int,
+        default=15,
+        help="Time window used to group generic events.",
+    )
+    p_generic_explain.add_argument(
+        "--index",
+        type=int,
+        default=0,
+        help="Zero-based index into the grouped generic incidents.",
+    )
+    p_generic_explain.add_argument(
+        "--first",
+        action="store_true",
+        help="Explain the first generic incident.",
+    )
+    p_generic_explain.add_argument(
+        "--use-ai",
+        action="store_true",
+        help="Call the configured AI backend for structured analysis.",
+    )
+    p_generic_explain.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format.",
+    )
+    p_generic_explain.add_argument(
+        "--output",
+        help="Optional path to write JSON output instead of stdout.",
+    )
+    p_generic_explain.set_defaults(func=cmd_generic_explain)
+
     p_examples = subparsers.add_parser(
         "examples",
         help="Show example log_path/log-type/model-path combinations.",
@@ -245,6 +410,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     register_explain_parser(subparsers)
     subparsers.choices["explain"].set_defaults(func=cmd_explain)
+
+    register_ai_explain_parser(subparsers)
+    subparsers.choices["ai-explain"].set_defaults(func=cmd_ai_explain)
 
     register_report_parser(subparsers)
     subparsers.choices["report"].set_defaults(func=cmd_report)
