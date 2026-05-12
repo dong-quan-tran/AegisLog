@@ -26,6 +26,10 @@ from aegislog.adapters.ssh import (
     load_ssh_normalized_events,
     summarize_ssh_normalized_events,
 )
+from aegislog.adapters.apache import (
+    load_apache_normalized_events,
+    summarize_apache_normalized_events,
+)
 
 __all__ = [
     "write_output",
@@ -52,7 +56,7 @@ def cmd_examples(args: argparse.Namespace) -> None:
     print("  aegislog normalize-ssh data/loghub/SSH.log")
     print("  aegislog generic-incidents data/sample_generic.jsonl")
     print("  aegislog generic-explain data/sample_generic.jsonl --index 0 --use-ai")
-
+    print("  aegislog normalize-apache data/Apache.log")
 
 def cmd_init(args: argparse.Namespace) -> None:
     print("Init placeholder: will set up SQLite experiment DB.")
@@ -143,6 +147,39 @@ def cmd_normalize_ssh(args: argparse.Namespace) -> int:
 
     return 0
 
+def cmd_normalize_apache(args: argparse.Namespace) -> int:
+    events = load_apache_normalized_events(args.path)
+    preview = [event.to_dict() for event in events[: args.top]]
+    summary = summarize_apache_normalized_events(events)
+
+    payload = {
+        "path": args.path,
+        "source_type": "apache",
+        "summary": summary,
+        "preview": preview,
+    }
+
+    if args.format == "json":
+        text = json.dumps(payload, indent=2)
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(text + "\n")
+        else:
+            print(text)
+        return 0
+
+    print(f"Normalized {summary['total_events']} Apache event(s) from {args.path}")
+    print(f"Previewing first {len(preview)} event(s)")
+    print(f"Severity counts: {summary['severity_counts']}")
+    print(f"Event action counts: {summary['event_action_counts']}")
+    print(f"Apache level counts: {summary['apache_level_counts']}")
+
+    for idx, item in enumerate(preview):
+        print()
+        print(f"[{idx}]")
+        print(json.dumps(item, indent=2))
+
+    return 0
 
 def cmd_generic_incidents(args: argparse.Namespace) -> int:
     events, errors = load_generic_jsonl(args.path)
@@ -312,6 +349,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  aegislog normalize-ssh data/loghub/SSH.log\n"
             "  aegislog generic-incidents data/sample_generic.jsonl\n"
             "  aegislog generic-explain data/sample_generic.jsonl --index 0 --use-ai\n"
+            "  aegislog normalize-apache data/loghub/Apache.log\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -369,7 +407,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to write JSON output instead of stdout.",
     )
     p_norm_ssh.set_defaults(func=cmd_normalize_ssh)
-
+    p_norm_apache = subparsers.add_parser(
+        "normalize-apache",
+        help="Normalize Apache error logs into the common event schema.",
+    )
+    p_norm_apache.add_argument("path", help="Path to Apache error log file.")
+    p_norm_apache.add_argument(
+        "--top",
+        type=int,
+        default=5,
+        help="Number of normalized events to preview.",
+    )
+    p_norm_apache.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format.",
+    )
+    p_norm_apache.add_argument(
+        "--output",
+        help="Optional path to write JSON output instead of stdout.",
+    )
+    p_norm_apache.set_defaults(func=cmd_normalize_apache)
     p_generic_incidents = subparsers.add_parser(
         "generic-incidents",
         help="Group normalized generic JSONL events into simple generic incidents.",
