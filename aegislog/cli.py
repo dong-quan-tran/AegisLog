@@ -30,6 +30,7 @@ from aegislog.adapters.apache import (
     load_apache_normalized_events,
     summarize_apache_normalized_events,
 )
+from aegislog.normalized_loader import load_normalized_events, NormalizedLoadError
 
 __all__ = [
     "write_output",
@@ -57,6 +58,9 @@ def cmd_examples(args: argparse.Namespace) -> None:
     print("  aegislog generic-incidents data/sample_generic.jsonl")
     print("  aegislog generic-explain data/sample_generic.jsonl --index 0 --use-ai")
     print("  aegislog normalize-apache data/Apache.log")
+    print("  aegislog normalized-incidents data/sample_generic.jsonl --source-type generic")
+    print("  aegislog normalized-incidents data/loghub/SSH.log --source-type ssh")
+    print("  aegislog normalized-incidents data/loghub/Apache.log --source-type apache")
 
 def cmd_init(args: argparse.Namespace) -> None:
     print("Init placeholder: will set up SQLite experiment DB.")
@@ -111,6 +115,65 @@ def cmd_normalize(args: argparse.Namespace) -> int:
 
     return 0
 
+def cmd_normalized_incidents(args: argparse.Namespace) -> int:
+    try:
+        events, errors = load_normalized_events(
+            source_type=args.source_type,
+            path=args.path,
+            input_format=args.input_format,
+        )
+    except NormalizedLoadError as e:
+        print(str(e))
+        return 1
+
+    incidents = group_generic_events_to_incidents(
+        events,
+        window_minutes=args.window_minutes,
+    )
+
+    payload = {
+        "path": args.path,
+        "source_type": args.source_type,
+        "input_format": args.input_format,
+        "window_minutes": args.window_minutes,
+        "total_events": len(events),
+        "total_incidents": len(incidents),
+        "incidents": [incident.to_dict() for incident in incidents[: args.top]],
+        "parse_errors": errors,
+    }
+
+    if args.format == "json":
+        text = json.dumps(payload, indent=2)
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(text + "\n")
+        else:
+            print(text)
+        return 0
+
+    print(
+        f"Grouped {len(events)} normalized {args.source_type} event(s) into "
+        f"{len(incidents)} incident(s)"
+    )
+    print(f"Showing top {min(len(incidents), args.top)} incident(s)")
+
+    if errors:
+        print(f"Parse errors: {len(errors)}")
+        for err in errors[:10]:
+            print(f"  {err}")
+
+    for idx, incident in enumerate(incidents[: args.top]):
+        print(
+            f"[{idx}] id={incident.incident_id} "
+            f"priority={incident.priority} severity={incident.severity} "
+            f"confidence={incident.confidence} pattern={incident.attack_pattern} "
+            f"events={incident.event_count} errors={incident.error_count} warnings={incident.warning_count}"
+        )
+        print(f"  group_key={incident.group_key}")
+        print(f"  summary_title={incident.summary_title}")
+        print(f"  summary_description={incident.summary_description}")
+
+    return 0
 
 def cmd_normalize_ssh(args: argparse.Namespace) -> int:
     events = load_ssh_normalized_events(args.path)
@@ -463,6 +526,46 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to write JSON output instead of stdout.",
     )
     p_generic_incidents.set_defaults(func=cmd_generic_incidents)
+    p_norm_inc = subparsers.add_parser(
+        "normalized-incidents",
+        help="Group normalized events from generic/ssh/apache into incidents.",
+    )
+    p_norm_inc.add_argument("path", help="Path to the input log file.")
+    p_norm_inc.add_argument(
+        "--source-type",
+        choices=["generic", "ssh", "apache"],
+        required=True,
+        help="Logical source type for this log.",
+    )
+    p_norm_inc.add_argument(
+        "--input-format",
+        choices=["jsonl"],
+        default="jsonl",
+        help="Input format for generic logs (ignored for ssh/apache).",
+    )
+    p_norm_inc.add_argument(
+        "--window-minutes",
+        type=int,
+        default=15,
+        help="Time window used to group events.",
+    )
+    p_norm_inc.add_argument(
+        "--top",
+        type=int,
+        default=5,
+        help="Number of incidents to show.",
+    )
+    p_norm_inc.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format.",
+    )
+    p_norm_inc.add_argument(
+        "--output",
+        help="Optional path to write JSON output instead of stdout.",
+    )
+    p_norm_inc.set_defaults(func=cmd_normalized_incidents)
 
     p_generic_explain = subparsers.add_parser(
         "generic-explain",
