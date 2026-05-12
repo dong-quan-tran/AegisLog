@@ -1,8 +1,6 @@
 # Aegislog Training Cheatsheet
 
-This cheatsheet explains how to train anomaly detection models for Aegislog and how those models connect to the `analyze`, `incidents`, `report`, Apache CLI commands, and AI-style explain for SSH.
-
-
+This cheatsheet explains how to train anomaly detection models for Aegislog and how those models connect to the `analyze`, `incidents`, `report`, Apache CLI commands, and AI-style explain for SSH and Apache. It also clarifies how trained models interact with the AI backend (mock vs Ollama).
 
 ---
 
@@ -34,9 +32,7 @@ The saved model can then be used by:
 
 - `analyze`, `incidents`, and `report` via their `--model-path` / `--model-type` options (SSH + Apache).
 - The Apache-specific CLI (`python -m aegislog.cli_apache`) via its `--model-path` / `--model-type` options.
-- The SSH `explain` command when building AI-style analysis (`--use-llm`) from scored incidents and evidence.
-
-
+- The SSH and Apache AI explain flows, which build their evidence on top of model-scored sessions before calling the AI backend (mock or Ollama).
 
 ---
 
@@ -123,8 +119,6 @@ aegislog train \
 
 Later, you can select these via `--model-type` + `--model-path` when analyzing or reporting.
 
-
-
 ---
 
 ## 3. Use the model with `analyze`
@@ -168,8 +162,6 @@ aegislog analyze \
 
 This runs the Apache error log through the pipeline, scores sessions with your trained Apache model, and prints the top suspicious sessions by anomaly score.
 
-
-
 ---
 
 ## 4. Use the model with `incidents` and `report` (SSH)
@@ -206,8 +198,6 @@ aegislog report \
 
 This uses the same model to summarize sessions and incidents (counts, severity, patterns, etc.).
 
-
-
 ---
 
 ## 5. How training relates to `model-type` and defaults
@@ -231,8 +221,6 @@ Common defaults (may vary slightly with code):
 This lets you maintain separate models for SSH and Apache while using the same CLI commands.
 
 If you explicitly pass `--model-path`, that path takes precedence over any defaults.
-
-
 
 ---
 
@@ -296,25 +284,29 @@ Apache CLI will:
 - score sessions with your chosen model,
 - support filters (`--min-score`, `--rare-hour-only`, etc.) and text/JSON output.
 
-
-
 ---
 
-## 7. SSH AI explain and trained models
+## 7. SSH AI explain, trained models, and the AI backend
 
-The AI-style SSH explain flow (`python -m aegislog.cli explain ... --use-llm`) builds on top of the **same trained SSH models** used for analyze/incidents/report:
+The AI-style SSH explain flow (`python -m aegislog.cli explain ... --use-llm`) builds on top of the **same trained SSH models** used for `analyze` / `incidents` / `report`, and then calls the configured AI backend:
 
-1. The model scores sessions in the SSH log.
+1. The SSH anomaly model scores sessions in the log.
 2. Sessions are grouped into incidents (by IP and auth patterns).
-3. Each incident is converted into structured `IncidentEvidence` plus a timeline and aggregate report.
-4. An internal AI analysis layer uses this structured evidence (not raw logs) to produce:
+3. Each incident is converted into structured `IncidentEvidence` plus a timeline and aggregate statistics.
+4. The AI backend (mock or Ollama) consumes this structured evidence to produce:
    - a natural-language summary,
    - a hypothesis about what is happening,
    - caveats and limitations,
    - recommended next steps,
    - optional playbook suggestions.
 
-The better your SSH model and features, the better the AI analysis will be, because the AI layer leans heavily on anomaly scores, failure ratios, attack pattern classification, and aggregate incident statistics rather than trying to infer everything directly from raw log lines.
+The AI backend is configured via environment variables:
+
+- `AEGISLOG_AI_BACKEND`:
+  - `mock` (default): deterministic, provider-free analysis.
+  - `ollama`: use a local Ollama model.
+- `AEGISLOG_OLLAMA_MODEL`: model name for Ollama (default: `llama3`).
+- `AEGISLOG_OLLAMA_HOST`: Ollama base URL (default: `http://localhost:11434`).
 
 To use a specific trained SSH model with AI explain:
 
@@ -330,7 +322,7 @@ aegislog explain \
   --output explain_ai.json
 ```
 
-
+If the AI backend fails (for example, Ollama not running), the CLI prints a friendly error and still returns the non-AI explain data without crashing.
 
 ---
 
@@ -349,21 +341,20 @@ aegislog explain \
 - AI-style explain with the same model:  
   `aegislog explain <LOGFILE> --log-type ssh_auth --model-type iforest --model-path <MODELFILE> --use-llm --format json --output explain_ai.json`
 
+---
 
-## 9. Apache AI explain and trained models
+## 9. Apache AI explain, trained models, and the AI backend
 
-The Apache AI explain flow (`python -m aegislog.cli_apache ... --ai-explain`) builds on the **same trained Apache models** used for `analyze` and `report`, similar to the SSH side:
+The Apache AI explain flow (`python -m aegislog.cli_apache ... --ai-explain`) works the same way conceptually:
 
-1. The model scores Apache sessions from the error log.
+1. The Apache anomaly model scores sessions from the error log.
 2. Suspicious sessions are selected using the same filters you would use for reports (score thresholds, rare hour, 5xx bursts, etc.).
 3. Each selected session is converted into structured Apache-specific `IncidentEvidence` (burst metrics, rare templates, 5xx density, unusual hours, etc.).
-4. An internal AI analysis layer consumes this structured evidence (not raw log lines) to produce:
+4. The AI backend (mock or Ollama) consumes this evidence to produce:
    - a natural-language summary of the behavior,
    - a hypothesis about what might be happening,
    - caveats and limitations,
    - suggested next steps for investigation or mitigation.
-
-Because the AI analysis is driven by features and anomaly scores rather than free-form log text, better Apache models and features directly improve AI explain quality.
 
 To use a specific trained Apache model with AI explain:
 
@@ -378,34 +369,43 @@ python -m aegislog.cli_apache \
   --output apache_explain_ai.json
 ```
 
-If the AI analysis layer is unavailable or fails (for example, due to upstream API errors), the Apache CLI will:
+The same `AEGISLOG_AI_BACKEND`, `AEGISLOG_OLLAMA_MODEL`, and `AEGISLOG_OLLAMA_HOST` environment variables control which AI backend is used.
 
-- print a clear error message (e.g. `AI analysis failed: <reason>`), and  
-- return a non-zero exit code,  
-
-while leaving the non-AI commands (`--explain`, `--report`, plain top-session listing) unchanged.
+If the AI backend fails, the Apache CLI prints a clear `AI analysis failed: ...`-style message and returns a non-zero exit code, while leaving non-AI behavior unchanged.
 
 ---
 
-## 10. When to use explain vs AI explain
+## 10. Generic logs and training
+
+The **generic log path** (normalized JSONL + `generic-incidents` + `generic-explain`) currently:
+
+- does **not** require or use any trained anomaly model,
+- relies on simple, source-agnostic heuristics:
+  - counts of events, errors, warnings,
+  - distinct users/hosts/source IPs,
+  - time windows and grouping keys,
+  - coarse patterns like `error_spike`, `warning_burst`, `auth_fail_burst`.
+
+`generic-explain` builds `IncidentEvidence` from these heuristics and then calls the same AI backend used by SSH and Apache, but there is no `train` step for generic logs yet. Training-based generic anomaly models could be added later, but are out of scope for the current checklist.
+
+---
+
+## 11. When to use explain vs AI explain
 
 For both SSH and Apache workflows:
 
-- Use **`--explain`** (SSH `explain` CLI or Apache `--explain`) when you want:
+- Use **plain explain** (`aegislog explain` without `--use-llm`, or `cli_apache --explain`) when you want:
   - deterministic, non-AI evidence output,
   - direct visibility into anomaly scores, ratios, bursts, and other features,
-  - behavior that does not depend on any external AI service.
+  - behavior that does not depend on any AI backend.
 
 - Use **AI explain**:
-  - SSH: `--use-llm` with `aegislog explain`  
-  - Apache: `--ai-explain` with `python -m aegislog.cli_apache`  
+  - SSH: `--use-llm` with `aegislog explain`
+  - Apache: `--ai-explain` with `python -m aegislog.cli_apache`
+  - Generic: `--use-ai` with `python -m aegislog.cli generic-explain`
   when you want:
   - structured, AI-generated narrative analysis,
   - hypotheses and recommended next steps derived from the evidence,
   - richer, human-readable summaries for investigations or demos.
 
-In both cases, the underlying anomaly detection model and feature engineering are the same; AI explain is an additional layer on top of the trained models, not a replacement for them.
-
----
-
-This cheatsheet now reflects both SSH and Apache training, multi-model support, how trained models are used across `analyze`, `incidents`, `report`, `cli_apache`, and how the SSH AI explain pipeline builds on top of trained models and structured evidence instead of raw log text.
+In all cases, anomaly detection and feature engineering remain first-class citizens; the AI layer is an additional explanation step on top of structured signals, not a replacement for them.
