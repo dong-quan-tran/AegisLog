@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from aegislog.incident.evidence import IncidentEvidence
 from aegislog.normalized import NormalizedEvent
 
 
@@ -85,6 +86,17 @@ class GenericIncident:
         }
 
 
+@dataclass
+class GenericIncidentBundle:
+    incident: GenericIncident
+    events: List[NormalizedEvent]
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = self.incident.to_dict()
+        data["events"] = [event.to_dict() for event in self.events]
+        return data
+
+
 def _window_bucket(ts: Optional[datetime], minutes: int) -> str:
     if ts is None:
         return "no_time"
@@ -93,11 +105,11 @@ def _window_bucket(ts: Optional[datetime], minutes: int) -> str:
     return bucket.isoformat()
 
 
-def group_generic_events_to_incidents(
+def group_generic_events_to_incident_bundles(
     events: List[NormalizedEvent],
     *,
     window_minutes: int = 15,
-) -> List[GenericIncident]:
+) -> List[GenericIncidentBundle]:
     buckets: Dict[str, List[NormalizedEvent]] = defaultdict(list)
 
     for event in events:
@@ -106,7 +118,7 @@ def group_generic_events_to_incidents(
         bucket_key = _window_bucket(ts, window_minutes)
         buckets[f"{group_key}||{bucket_key}"].append(event)
 
-    incidents: List[GenericIncident] = []
+    bundles: List[GenericIncidentBundle] = []
 
     for idx, (bucket_id, bucket_events) in enumerate(sorted(buckets.items()), start=1):
         timestamps = [_parse_dt(event.timestamp) for event in bucket_events]
@@ -120,7 +132,9 @@ def group_generic_events_to_incidents(
         src_ips = sorted({_safe_key(event.src_ip) for event in bucket_events if _safe_key(event.src_ip)})
 
         error_count = sum(1 for event in bucket_events if (event.severity or "").lower() == "error")
-        warning_count = sum(1 for event in bucket_events if (event.severity or "").lower() in {"warn", "warning"})
+        warning_count = sum(
+            1 for event in bucket_events if (event.severity or "").lower() in {"warn", "warning"}
+        )
         event_count = len(bucket_events)
 
         if error_count >= 5:
@@ -167,35 +181,151 @@ def group_generic_events_to_incidents(
             f"Detected pattern: {attack_pattern}."
         )
 
-        incidents.append(
-            GenericIncident(
-                incident_id=f"generic:{group_key}#{idx}",
-                group_key=group_key,
-                severity=severity,
-                confidence=confidence,
-                priority=priority,
-                attack_pattern=attack_pattern,
-                event_count=event_count,
-                error_count=error_count,
-                warning_count=warning_count,
-                distinct_users=len(users),
-                distinct_hosts=len(hosts),
-                distinct_src_ips=len(src_ips),
-                first_seen=first_seen,
-                last_seen=last_seen,
-                source_type=source_type,
-                summary_title=summary_title,
-                summary_description=summary_description,
-            )
+        incident = GenericIncident(
+            incident_id=f"generic:{group_key}#{idx}",
+            group_key=group_key,
+            severity=severity,
+            confidence=confidence,
+            priority=priority,
+            attack_pattern=attack_pattern,
+            event_count=event_count,
+            error_count=error_count,
+            warning_count=warning_count,
+            distinct_users=len(users),
+            distinct_hosts=len(hosts),
+            distinct_src_ips=len(src_ips),
+            first_seen=first_seen,
+            last_seen=last_seen,
+            source_type=source_type,
+            summary_title=summary_title,
+            summary_description=summary_description,
         )
+        bundles.append(GenericIncidentBundle(incident=incident, events=bucket_events))
 
-    incidents.sort(
+    bundles.sort(
         key=lambda x: (
-            {"critical": 4, "high": 3, "medium": 2, "low": 1}[x.priority],
-            {"high": 3, "medium": 2, "low": 1}[x.severity],
-            x.event_count,
-            x.error_count,
+            {"critical": 4, "high": 3, "medium": 2, "low": 1}[x.incident.priority],
+            {"high": 3, "medium": 2, "low": 1}[x.incident.severity],
+            x.incident.event_count,
+            x.incident.error_count,
         ),
         reverse=True,
     )
-    return incidents
+    return bundles
+
+
+def group_generic_events_to_incidents(
+    events: List[NormalizedEvent],
+    *,
+    window_minutes: int = 15,
+) -> List[GenericIncident]:
+    return [
+        bundle.incident
+        for bundle in group_generic_events_to_incident_bundles(
+            events,
+            window_minutes=window_minutes,
+        )
+    ]
+
+
+def build_generic_incident_evidence(
+    incident: GenericIncident,
+    events: List[NormalizedEvent],
+    *,
+    input_format: str = "jsonl",
+    window_minutes: int = 15,
+) -> IncidentEvidence:
+    highlights: List[str] = []
+
+    if incident.group_key:
+        highlights.append(f"Grouped by key: {incident.group_key}.")
+    highlights.append(
+        f"Observed {incident.event_count} event(s), including {incident.error_count} error(s) "
+        f"and {incident.warning_count} warning(s)."
+    )
+    highlights.append(
+        f"Distinct entities: {incident.distinct_users} user(s), {incident.distinct_hosts} host(s), "
+        f"{incident.distinct_src_ips} source IP(s)."
+    )
+    if incident.first_seen or incident.last_seen:
+        highlights.append(
+            f"Time range: {incident.first_seen or 'unknown'} to {incident.last_seen or 'unknown'}."
+        )
+    highlights.append(
+        f"Source type '{incident.source_type}' grouped into pattern '{incident.attack_pattern}'."
+    )
+
+    sample_events = []
+    session_rows = []
+
+    for idx, event in enumerate(events[:5], start=1):
+        sample_event = {
+            "timestamp": event.timestamp,
+            "event_category": event.event_category,
+            "event_action": event.event_action,
+            "severity": event.severity,
+            "src_ip": event.src_ip,
+            "dst_ip": event.dst_ip,
+            "user": event.user,
+            "host": event.host,
+            "service": event.service,
+            "message": event.message,
+            "session_hint": event.session_hint,
+        }
+        sample_events.append(sample_event)
+
+        session_rows.append(
+            {
+                "session_id": event.session_hint or f"{incident.incident_id}:event-{idx}",
+                "anomaly_score": 0.0,
+                "start_time": event.timestamp,
+                "end_time": event.timestamp,
+                "ip": event.src_ip,
+                "user": event.user,
+                "auth_failed": 1 if (event.event_action or "").lower() == "login_failed" else 0,
+                "auth_success": 1 if (event.event_action or "").lower() == "login_success" else 0,
+                "event_count": 1,
+                "event_type": event.event_action or event.event_category or "generic_event",
+                "notes": [
+                    f"severity={event.severity or 'unknown'}",
+                    f"service={event.service or 'unknown'}",
+                    f"host={event.host or 'unknown'}",
+                ],
+            }
+        )
+
+    representative_ip = next((event.src_ip for event in events if event.src_ip), None)
+    representative_user = next((event.user for event in events if event.user), None)
+
+    return IncidentEvidence(
+        incident_id=incident.incident_id,
+        log_type=incident.source_type,
+        ip=representative_ip,
+        user=representative_user,
+        model_type="generic",
+        feature_version="generic-v1",
+        threshold_percentile=0.0,
+        severity=incident.severity,
+        confidence=incident.confidence,
+        priority=incident.priority,
+        attack_pattern=incident.attack_pattern,
+        highlights=highlights,
+        sessions=session_rows,
+        extra={
+            "input_format": input_format,
+            "window_minutes": window_minutes,
+            "group_key": incident.group_key,
+            "source_type": incident.source_type,
+            "total_events": incident.event_count,
+            "error_count": incident.error_count,
+            "warning_count": incident.warning_count,
+            "distinct_users": incident.distinct_users,
+            "distinct_hosts": incident.distinct_hosts,
+            "distinct_src_ips": incident.distinct_src_ips,
+            "first_seen": incident.first_seen,
+            "last_seen": incident.last_seen,
+            "summary_title": incident.summary_title,
+            "summary_description": incident.summary_description,
+            "sample_events": sample_events,
+        },
+    )
