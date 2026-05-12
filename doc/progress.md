@@ -1542,3 +1542,122 @@ Make Apache AI error handling match SSH by catching LLMError in cli_apache.py in
 Run the full pytest suite again after that consistency fix and commit the remaining AI-related test changes.
 
 Clean up README or CLI help text so explain versus ai-explain is clearly documented for users.
+
+***
+
+## Progress log — 2026-05-11
+
+### 1) Ollama integration
+
+- Installed and verified Ollama locally (`ollama --version`, `ollama run llama3`).
+- Added an Ollama-backed AI client:
+  - New backend selection via `AEGISLOG_AI_BACKEND` (`mock` vs `ollama`).
+  - Model selection via `AEGISLOG_OLLAMA_MODEL` (default `llama3`).
+  - Optional host via `AEGISLOG_OLLAMA_HOST` (default `http://localhost:11434`).
+- Kept the existing mock backend as a full fallback.
+- Implemented schema validation for AI analysis outputs (summary, evidence, hypothesis, caveats, next_steps, playbook_slug, playbook_notes).
+- Wired the AI client into SSH and Apache explain flows without changing CLI flags.
+
+**Status:** SSH and Apache can both use local `llama3` via Ollama, or the mock backend, controlled by env vars.
+
+***
+
+### 2) SSH AI explain (Ollama)
+
+- Confirmed `python -m aegislog.cli explain ... --use-llm --format json` successfully:
+  - Builds incident evidence for SSH.
+  - Constructs a structured prompt.
+  - Calls the Ollama backend and receives valid JSON.
+- Observed `ai_analysis` containing:
+  - High-severity brute-force summaries.
+  - Evidence lines pulled from the structured incident.
+  - Hypothesis about brute-force activity.
+  - Concrete next steps like blocking IPs and reviewing auth logs.
+- Verified behavior with:
+  - Narrow filters (`--first`, default severity).
+  - Broader filters (`--min-severity low`).
+
+**Status:** SSH explain is fully AI-powered via local LLM and stable under different filters.
+
+***
+
+### 3) Apache AI explain (Ollama)
+
+- Ran `python -m aegislog.cli_apache ... --ai-explain --format json`.
+- Confirmed `ai_analysis` describes:
+  - Error spikes (e.g., 1130 errors/minute).
+  - Unusual-hour activity.
+  - Hypothesis about spikes being due to attacks or misconfig/misbehavior.
+  - Next steps such as inspecting error logs and configuration.
+- Tested with:
+  - Basic `--ai-explain --first`.
+  - Filters (`--rare-hour-only`, `--min-5xx-burst`).
+  - Larger `--top` (e.g., `--top 50`).
+
+**Status:** Apache AI explain is wired to Ollama and behaves correctly with filters and larger candidate sets.
+
+***
+
+### 4) Failure handling and mock fallback
+
+- Tested behavior when Ollama times out / is unreachable:
+  - SSH explain prints a clear `[AI analysis unavailable] Ollama backend failed: ...` message.
+  - CLI does not crash or spill a traceback.
+  - Incident, local explanation, and prompt are still printed.
+- Switched to mock backend with `AEGISLOG_AI_BACKEND="mock"` and confirmed:
+  - The same CLI call uses deterministic mock analysis.
+  - Playbook slug and notes are populated.
+  - Output shape stays identical, only content changes.
+
+**Status:** Failure modes and backend switching are robust; mock remains a safe, deterministic fallback.
+
+***
+
+### 5) Generic normalized logs: foundation
+
+- Added a normalized event model:
+  - `NormalizedEvent` with fields like timestamp, source_type, event_category, event_action, severity, src_ip, user, host, service, status_code, message, session_hint, extra.
+  - Normalization helpers:
+    - Coerce timestamps into ISO strings.
+    - Map common keys (`timestamp`, `@timestamp`, `time`, etc.).
+    - Map `level`/`severity`/`log_level` into a single severity.
+    - Map IP/user/host/service from multiple aliases.
+- Implemented a generic JSONL parser:
+  - `load_generic_jsonl(path)`:
+    - Reads JSON Lines (one JSON object per line).
+    - Produces normalized events and a list of parse errors.
+  - `summarize_normalized_events(events)`:
+    - total events.
+    - severity counts.
+    - event_category counts.
+    - event_action counts.
+
+**Status:** Any JSONL log with reasonable field names can now be mapped into a common event schema.
+
+***
+
+### 6) Generic normalize CLI command
+
+- Added `normalize` subcommand to the main CLI:
+  - `python -m aegislog.cli normalize data/sample_generic.jsonl`
+  - `--format text|json`
+  - `--top` to preview first N normalized events.
+- Verified:
+  - Total events count is correct (4 in the sample file).
+  - Severity, category, and action counts are computed and printed.
+  - Normalized preview shows all key fields filled as expected.
+  - JSON output includes `summary`, `preview`, and `parse_errors`.
+
+**Status:** Users can now run AegisLog on their own JSONL logs and see a normalized view, independent of SSH/Apache.
+
+***
+
+### Overall: where today ended
+
+- Local Ollama backend is integrated and thoroughly tested for both SSH and Apache.
+- Mock backend remains fully supported and switchable.
+- The first piece of “generic log” support is in place:
+  - a stable normalized schema,
+  - JSONL ingestion,
+  - and a CLI command to inspect normalized events.
+- You are now one small step away from generic **incidents** (grouping + scoring) and then generic **AI explain** using the same Ollama backend.
