@@ -9,3 +9,4 @@ alembic
 pytest
 python-dotenv
 joblib
+requests
