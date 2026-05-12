@@ -13,7 +13,7 @@ from aegislog.cli_ssh import (
     register_report_parser,
 )
 from aegislog.parsing.generic import load_generic_jsonl, summarize_normalized_events
-
+from aegislog.incidents_generic import group_generic_events_to_incidents
 
 __all__ = [
     "write_output",
@@ -90,6 +90,52 @@ def cmd_normalize(args: argparse.Namespace) -> int:
 
     return 0
 
+def cmd_generic_incidents(args: argparse.Namespace) -> int:
+    events, errors = load_generic_jsonl(args.path)
+    incidents = group_generic_events_to_incidents(
+        events,
+        window_minutes=args.window_minutes,
+    )
+
+    payload = {
+        "path": args.path,
+        "input_format": args.input_format,
+        "window_minutes": args.window_minutes,
+        "total_events": len(events),
+        "total_incidents": len(incidents),
+        "incidents": [incident.to_dict() for incident in incidents[: args.top]],
+        "parse_errors": errors,
+    }
+
+    if args.format == "json":
+        text = json.dumps(payload, indent=2)
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(text + "\n")
+        else:
+            print(text)
+        return 0
+
+    print(f"Grouped {len(events)} event(s) into {len(incidents)} generic incident(s)")
+    print(f"Showing top {min(len(incidents), args.top)} incident(s)")
+
+    if errors:
+        print(f"Parse errors: {len(errors)}")
+        for err in errors[:10]:
+            print(f"  {err}")
+
+    for idx, incident in enumerate(incidents[: args.top]):
+        print(
+            f"[{idx}] id={incident.incident_id} "
+            f"priority={incident.priority} severity={incident.severity} "
+            f"confidence={incident.confidence} pattern={incident.attack_pattern} "
+            f"events={incident.event_count} errors={incident.error_count} warnings={incident.warning_count}"
+        )
+        print(f"  group_key={incident.group_key}")
+        print(f"  summary_title={incident.summary_title}")
+        print(f"  summary_description={incident.summary_description}")
+
+    return 0
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -139,7 +185,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to write JSON output instead of stdout.",
     )
     p_normalize.set_defaults(func=cmd_normalize)
-
+    p_generic_incidents = subparsers.add_parser(
+        "generic-incidents",
+        help="Group normalized generic JSONL events into simple generic incidents.",
+    )
+    p_generic_incidents.add_argument("path", help="Path to the input log file.")
+    p_generic_incidents.add_argument(
+        "--input-format",
+        choices=["jsonl"],
+        default="jsonl",
+        help="Input format for generic logs.",
+    )
+    p_generic_incidents.add_argument(
+        "--window-minutes",
+        type=int,
+        default=15,
+        help="Time window used to group generic events.",
+    )
+    p_generic_incidents.add_argument(
+        "--top",
+        type=int,
+        default=5,
+        help="Number of incidents to show.",
+    )
+    p_generic_incidents.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format.",
+    )
+    p_generic_incidents.add_argument(
+        "--output",
+        help="Optional path to write JSON output instead of stdout.",
+    )
+    p_generic_incidents.set_defaults(func=cmd_generic_incidents)
+    
     p_examples = subparsers.add_parser(
         "examples",
         help="Show example log_path/log-type/model-path combinations.",
