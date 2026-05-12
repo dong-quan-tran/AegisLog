@@ -6,21 +6,6 @@ from aegislog.incident.evidence import IncidentEvidence
 
 
 def build_incident_analysis_prompt(evidence: IncidentEvidence) -> Dict[str, Any]:
-    """
-    Convert IncidentEvidence into the normalized prompt shape expected by
-    generate_incident_analysis().
-
-    Returned schema:
-      {
-        "incident": {...},
-        "evidence": {...},
-        "timeline_summary": str,
-        "aggregates": {...},
-      }
-
-    This function is intentionally deterministic and provider-agnostic so it
-    can be reused by multiple CLIs (SSH, Apache, future log types).
-    """
     if evidence.log_type == "apache_error":
         return _build_apache_prompt(evidence)
 
@@ -127,20 +112,33 @@ def _build_generic_prompt(evidence: IncidentEvidence) -> Dict[str, Any]:
         "attack_pattern": evidence.attack_pattern,
         "primary_user": evidence.user,
         "total_events": extra.get("total_events", 0),
-        "avg_anomaly_score": extra.get("avg_anomaly_score", 0.0),
+        "error_count": extra.get("error_count", 0),
+        "warning_count": extra.get("warning_count", 0),
+        "distinct_users": extra.get("distinct_users", 0),
+        "distinct_hosts": extra.get("distinct_hosts", 0),
+        "distinct_src_ips": extra.get("distinct_src_ips", 0),
+        "group_key": extra.get("group_key"),
+        "source_type": extra.get("source_type"),
+        "first_seen": extra.get("first_seen"),
+        "last_seen": extra.get("last_seen"),
+        "summary_title": extra.get("summary_title"),
+        "summary_description": extra.get("summary_description"),
     }
 
     evidence_block = {
         "highlights": list(evidence.highlights),
+        "sample_events": list(extra.get("sample_events", [])),
     }
 
     timeline_summary = (
-        f"Incident {evidence.incident_id} for log_type '{evidence.log_type}' "
+        f"Generic incident {evidence.incident_id} for log_type '{evidence.log_type}' "
         f"with attack pattern '{evidence.attack_pattern}' and severity {evidence.severity}."
     )
 
     aggregates = {
         "total_incidents": 1,
+        "input_format": extra.get("input_format"),
+        "window_minutes": extra.get("window_minutes"),
     }
 
     return {
