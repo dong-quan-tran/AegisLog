@@ -35,17 +35,6 @@ class IncidentAIAnalysis(TypedDict):
 
 
 def generate_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
-    """
-    Core AI entrypoint for incident analysis.
-
-    Backends:
-    - mock (default): deterministic, provider-free explanation.
-    - ollama: use a local Ollama model via HTTP API.
-
-    Backend selection is controlled by:
-    - AEGISLOG_AI_BACKEND = "mock" | "ollama"
-    - AEGISLOG_OLLAMA_MODEL = "<model name>" (default: "llama3")
-    """
     backend = os.getenv("AEGISLOG_AI_BACKEND", "mock").strip().lower()
 
     if backend == "ollama":
@@ -53,22 +42,13 @@ def generate_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
             analysis = _ollama_incident_analysis(prompt)
             return validate_ai_analysis(analysis)
         except Exception as exc:
-            # Fallback to mock if Ollama is unavailable or misconfigured.
-            # Re-raise as LLMError so CLI can handle it consistently.
             raise LLMError(f"Ollama backend failed: {exc}") from exc
 
-    # Default: deterministic mock backend
     analysis = _mock_incident_analysis(prompt)
     return validate_ai_analysis(analysis)
 
 
 def validate_ai_analysis(payload: Dict[str, Any]) -> IncidentAIAnalysis:
-    """
-    Validate that the AI analysis payload matches the expected schema.
-
-    Ensures all required keys are present and of the correct basic type.
-    Raises LLMError if the payload is malformed.
-    """
     if not isinstance(payload, dict):
         raise LLMError("AI analysis must be a dict.")
 
@@ -117,21 +97,12 @@ def validate_ai_analysis(payload: Dict[str, Any]) -> IncidentAIAnalysis:
 
 
 def _ollama_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
-    """
-    Use a local Ollama model to generate incident analysis.
-
-    Expects Ollama to be running locally (default: http://localhost:11434)
-    and a model pulled (default: `llama3`).
-
-    Uses the /api/chat endpoint with a system prompt + user content,
-    and asks the model to return JSON matching IncidentAIAnalysis.
-    """
     model = os.getenv("AEGISLOG_OLLAMA_MODEL", "llama3").strip() or "llama3"
     host = os.getenv("AEGISLOG_OLLAMA_HOST", "http://localhost:11434").rstrip("/")
     url = f"{host}/api/chat"
 
     system_prompt = (
-        "You are an incident response assistant for SSH and Apache logs. "
+        "You are an incident response assistant for SSH, Apache, and generic normalized logs. "
         "You receive structured incident evidence (JSON) and must respond "
         "with a single JSON object that matches this Python TypedDict schema:\n\n"
         "IncidentAIAnalysis = {\n"
@@ -147,6 +118,7 @@ def _ollama_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
         "- Respond with JSON only, no extra text.\n"
         "- Use short, clear sentences.\n"
         "- Summaries and hypotheses should focus on what is most likely happening.\n"
+        "- For generic logs, state uncertainty clearly and avoid source-specific claims not supported by the data.\n"
         "- Next steps must be concrete investigation or response actions.\n"
     )
 
@@ -162,7 +134,6 @@ def _ollama_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
-        # Ask Ollama to produce JSON output; newer versions support format='json'.
         "stream": False,
         "format": "json",
     }
@@ -182,13 +153,11 @@ def _ollama_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
     except Exception as exc:
         raise LLMError(f"Could not parse Ollama JSON response: {exc}") from exc
 
-    # For chat format='json', response["message"]["content"] should already be parsed JSON
     message = data.get("message") or {}
     content = message.get("content")
     if isinstance(content, dict):
         raw = content
     else:
-        # Fallback: content is a JSON string.
         try:
             raw = json.loads(content or "{}")
         except Exception as exc:
@@ -209,13 +178,6 @@ def _ollama_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
 
 
 def _mock_incident_analysis(prompt: Dict[str, Any]) -> IncidentAIAnalysis:
-    """
-    Deterministic, provider-free implementation of incident analysis.
-
-    This is intentionally simple and cheap: it inspects the structured
-    prompt, chooses a playbook, and generates a short explanation that
-    a real LLM could later refine.
-    """
     incident = prompt.get("incident", {}) or {}
     evidence = prompt.get("evidence", {}) or {}
     timeline_summary = prompt.get("timeline_summary", "") or ""
@@ -261,7 +223,7 @@ def _build_summary(
     primary_user = incident.get("primary_user") or "unknown user"
 
     base = (
-        f"This incident involves SSH activity for {primary_user} from {ip}, "
+        f"This incident involves activity associated with {primary_user} from {ip}, "
         f"classified as {severity} severity with attack pattern '{attack_pattern}'."
     )
 
@@ -287,10 +249,18 @@ def _build_evidence_bullets(
     auth_burst = incident.get("auth_burst_max_per_minute")
     fail_streak = incident.get("auth_failed_streak_max")
 
+    error_count = incident.get("error_count")
+    warning_count = incident.get("warning_count")
+    distinct_users = incident.get("distinct_users")
+    distinct_hosts = incident.get("distinct_hosts")
+    distinct_src_ips = incident.get("distinct_src_ips")
+    first_seen = incident.get("first_seen")
+    last_seen = incident.get("last_seen")
+    source_type = incident.get("source_type")
+    group_key = incident.get("group_key")
+
     if total_events is not None:
-        bullets.append(
-            f"Total SSH authentication events in this incident: {total_events}."
-        )
+        bullets.append(f"Total events in this incident: {total_events}.")
     if auth_failed is not None and auth_success is not None:
         bullets.append(
             f"Observed {auth_failed} failed and {auth_success} successful SSH authentication attempts."
@@ -306,11 +276,34 @@ def _build_evidence_bullets(
             f"Maximum failed-login burst in a one-minute window: {auth_burst} events."
         )
 
+    if error_count is not None or warning_count is not None:
+        bullets.append(
+            f"Generic incident counts include {error_count or 0} error event(s) and "
+            f"{warning_count or 0} warning event(s)."
+        )
+    if distinct_users is not None or distinct_hosts is not None or distinct_src_ips is not None:
+        bullets.append(
+            f"Distinct entities observed: {distinct_users or 0} user(s), "
+            f"{distinct_hosts or 0} host(s), and {distinct_src_ips or 0} source IP(s)."
+        )
+    if first_seen or last_seen:
+        bullets.append(
+            f"Observed time range: {first_seen or 'unknown'} to {last_seen or 'unknown'}."
+        )
+    if source_type:
+        bullets.append(f"Source type: {source_type}.")
+    if group_key:
+        bullets.append(f"Grouping key: {group_key}.")
+
     highlights = evidence.get("highlights") or []
     if isinstance(highlights, list) and highlights:
         bullets.append("Evidence highlights:")
         for h in highlights[:3]:
             bullets.append(f"- {h}")
+
+    sample_events = evidence.get("sample_events") or []
+    if isinstance(sample_events, list) and sample_events:
+        bullets.append(f"Sample normalized events included: {min(len(sample_events), 5)}.")
 
     return bullets
 
@@ -341,10 +334,25 @@ def _build_hypothesis(
             "The combination of failures followed by a successful login suggests a possible "
             "account compromise."
         )
+    if attack_pattern == "auth_fail_burst":
+        return (
+            "The normalized activity suggests a burst of authentication failures, "
+            "which may indicate credential guessing or repeated invalid access attempts."
+        )
+    if attack_pattern == "error_spike":
+        return (
+            "The incident is dominated by error events, which may indicate an application, "
+            "service, or infrastructure failure rather than confirmed malicious activity."
+        )
+    if attack_pattern == "warning_burst":
+        return (
+            "The incident shows a concentrated burst of warning-level events, which may indicate "
+            "degraded service behavior or early-stage abnormal activity."
+        )
 
     return (
-        "The activity appears to be low-signal background noise or routine probing, "
-        "but should still be monitored for escalation."
+        "The activity appears anomalous in the normalized log stream, but the source data does not "
+        "support a more specific classification with high confidence."
     )
 
 
@@ -357,8 +365,7 @@ def _build_caveats(
     total_incidents = aggregates.get("total_incidents")
     if total_incidents is not None and total_incidents < 3:
         caveats.append(
-            "Overall incident volume is low in the aggregate data, so severity estimates "
-            "may be less stable."
+            "Overall incident volume is low in the aggregate data, so severity estimates may be less stable."
         )
 
     if incident.get("ip") is None:
@@ -368,13 +375,16 @@ def _build_caveats(
 
     if incident.get("primary_user") is None:
         caveats.append(
-            "The primary user associated with this activity could not be determined, "
-            "which limits user-focused investigation steps."
+            "The primary user associated with this activity could not be determined, which limits user-focused investigation steps."
+        )
+
+    if incident.get("source_type") not in {None, "ssh_auth", "apache_error"}:
+        caveats.append(
+            "This analysis is based on normalized generic logs, so field mapping or parser limitations may reduce source-specific accuracy."
         )
 
     caveats.append(
-        "This analysis is based solely on SSH authentication patterns and does not include "
-        "full process, file, or network telemetry."
+        "This analysis is based only on the structured incident evidence provided and does not include full endpoint, process, file, or packet telemetry."
     )
 
     return caveats
@@ -385,8 +395,8 @@ def _build_next_steps(playbook: Optional[Playbook]) -> List[str]:
         return list(playbook.next_steps)
 
     return [
-        "Review detailed logs for the affected host(s) around the time of this incident.",
-        "Confirm whether any high-value accounts were successfully accessed during the incident window.",
-        "If anything suspicious is confirmed, rotate credentials and keys for affected accounts.",
-        "Increase monitoring on the affected host(s) and consider tightening SSH access controls.",
+        "Review the normalized events and raw source logs for the affected time window.",
+        "Validate whether the grouped entities, users, hosts, and source IPs reflect a real incident boundary.",
+        "Check surrounding logs or telemetry to determine whether the pattern reflects malicious activity, misuse, or service degradation.",
+        "If suspicious behavior is confirmed, contain affected accounts, hosts, or services and expand monitoring.",
     ]
