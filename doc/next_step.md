@@ -1,229 +1,59 @@
-# NEXT_STEPS_GENERIC_LOGS.md
+Remaining checklist (from here forward)
+Adapters / normalization polish
+Clean up Apache error parser so log level is a first-class field, not stashed in user_agent, and adjust the adapter accordingly.
 
-# AegisLog Generic Log Support Plan
+Add small, user-friendly error handling for all normalize / normalized-incidents commands (e.g., missing file, unsupported source type) so users don’t see raw tracebacks.
 
-## Goal
+Add one or two tiny unit-style tests for each adapter (SSH/Apache) that assert a couple of representative lines normalize into the expected NormalizedEvent fields (timestamp, source_type, event_action, severity, session_hint, extra).
 
-Make AegisLog usable on user-provided logs by introducing a normalization layer and a generic analysis path, instead of limiting the project to SSH and Apache only.
+Normalized explain (AI on generic/SSH/Apache)
+Design a generic incident evidence dataclass/type that can describe any normalized incident (generic/SSH/Apache) using only normalized fields (no source-specific types).
 
----
+Add a normalized incident explain CLI (either normalized-explain or an extension of generic-explain) that:
 
-## Phase 1 — Normalized schema
+Accepts --source-type (generic, ssh, apache) and --window-minutes.
 
-- [ ] Create a new normalized event schema for all supported logs.
-- [ ] Keep the first version intentionally small and stable.
-- [ ] Required fields:
-  - [ ] timestamp
-  - [ ] source_type
-  - [ ] raw_message
-  - [ ] event_category
-  - [ ] event_action
-  - [ ] severity
-  - [ ] src_ip
-  - [ ] dst_ip
-  - [ ] user
-  - [ ] host
-  - [ ] service
-  - [ ] status_code
-  - [ ] message
-  - [ ] session_hint
-  - [ ] extra
-- [ ] Decide representation:
-  - [ ] dataclass
-  - [ ] TypedDict
-  - [ ] pandas row contract
-- [ ] Add one canonical helper that converts normalized events to dictionaries for JSON output.
+Uses load_normalized_events(...) + group_generic_events_to_incident_bundles(...).
 
-### Done when
-- [ ] Every later parser can target one shared schema.
-- [ ] Existing SSH and Apache code can be mapped into it.
+Selects an incident by --index or --first.
 
----
+Builds generic incident evidence from the normalized events + incident.
 
-## Phase 2 — Source adapters
+Add a prompt builder for generic/normalized incidents that:
 
-- [ ] Keep SSH as adapter #1.
-- [ ] Keep Apache as adapter #2.
-- [ ] Add a new generic parser entrypoint for user logs.
-- [ ] Support at least these input styles first:
-  - [ ] JSON lines
-  - [ ] simple delimited text
-  - [ ] syslog-like plain text
-- [ ] Add format detection:
-  - [ ] explicit `--log-type`
-  - [ ] optional `auto`
-- [ ] Route each source into its own parser, then normalize output.
+Describes uncertainty and the fact that it’s working from a normalized schema.
 
-### Done when
-- [ ] AegisLog can ingest raw logs from more than just SSH and Apache.
-- [ ] All supported parsers emit the same normalized event structure.
+Uses only normalized fields (no SSH/Apache-specific jargon).
 
----
+Wire the normalized explain CLI into the existing AI backend layer, reusing:
 
-## Phase 3 — Generic CLI path
+Existing environment variables (AEGISLOG_AI_BACKEND, AEGISLOG_OLLAMA_MODEL, etc.).
 
-- [ ] Add a new CLI path for normalized logs.
-- [ ] Keep `python -m aegislog.cli` style.
-- [ ] Add commands that work on normalized events:
-  - [ ] analyze
-  - [ ] incidents
-  - [ ] explain
-- [ ] Allow users to pass their own file without needing SSH/Apache-specific flags.
-- [ ] Add an option like:
-  - [ ] `--log-type generic`
-  - [ ] `--input-format jsonl|text|syslog|auto`
+Existing structured response schema (summary, evidence, hypothesis, caveats, next_steps, playbook_slug, playbook_notes).
 
-### Done when
-- [ ] A user can point AegisLog at their own log file and get useful output.
+Existing failure-handling pattern (friendly “AI unavailable” messages, no stack traces).
 
----
+Mapping files & more inputs (next phase)
+Design a simple field-mapping config format (YAML/JSON) that lets users map custom fields (e.g., client_ip → src_ip, severity → severity, user → user, etc.) into the normalized schema.
 
-## Phase 4 — Generic event grouping
+Implement a config-driven generic parser for structured text (e.g., JSONL with arbitrary field names), using the mapping file to feed NormalizedEvent.from_mapping(...).
 
-- [ ] Design generic session/grouping rules.
-- [ ] Group by combinations like:
-  - [ ] src_ip + time window
-  - [ ] user + time window
-  - [ ] host + service + time window
-  - [ ] session_hint when available
-- [ ] Keep SSH-specific grouping logic where it is.
-- [ ] Keep Apache-specific grouping logic where it is.
-- [ ] Add a generic grouping strategy for unknown logs.
+Add support for at least one additional input format (e.g., syslog-style text) with a simple generic parser and mapping into NormalizedEvent.
 
-### Done when
-- [ ] User logs can still be grouped into incidents even without SSH-specific semantics.
+Add small CLI affordances for those mappings, e.g. --mapping path/to/mapping.yaml on normalize / normalized-incidents.
 
----
+Documentation & usability
+Update README with a “Bring your own logs” section showing:
 
-## Phase 5 — Generic feature extraction
+How to run normalize on JSONL.
 
-- [ ] Add source-agnostic features for normalized logs:
-  - [ ] event_count
-  - [ ] distinct_users
-  - [ ] distinct_hosts
-  - [ ] distinct_ips
-  - [ ] error_ratio
-  - [ ] warning_ratio
-  - [ ] rare_hour
-  - [ ] burst_max_per_minute
-  - [ ] status_4xx
-  - [ ] status_5xx
-  - [ ] failed_action_count
-  - [ ] successful_action_count
-- [ ] Preserve source-specific features in separate branches.
-- [ ] Keep feature naming consistent across log types where possible.
+How to run normalize-ssh and normalize-apache.
 
-### Done when
-- [ ] The anomaly/scoring layer has enough signal to rank generic incidents.
+How to run normalized-incidents for each source type.
 
----
+How to enable AI (mock vs Ollama) and run the explain commands.
 
-## Phase 6 — Generic incident model
+Add one or two more sample logs (e.g., another small JSONL with mixed auth/app events) for quick demos.
 
-- [ ] Keep current incident fields:
-  - [ ] severity
-  - [ ] confidence
-  - [ ] priority
-  - [ ] attack_pattern
-- [ ] Add generic attack patterns:
-  - [ ] auth_fail_burst
-  - [ ] error_spike
-  - [ ] suspicious_status_spike
-  - [ ] rare_hour_activity
-  - [ ] unknown_anomalous_behavior
-- [ ] Avoid pretending to know more than the source supports.
-- [ ] Use “unknown” or “generic” labels when confidence is low.
+Add a short “architecture overview” doc or section explaining: parsers → adapters → normalized events → grouping → AI explain.
 
-### Done when
-- [ ] AegisLog can label incidents from user logs in a sensible way without overfitting to SSH or Apache terms.
-
----
-
-## Phase 7 — AI explain for generic logs
-
-- [ ] Add a generic evidence builder for normalized incidents.
-- [ ] Add a generic prompt template.
-- [ ] Reuse the same `generate_incident_analysis(...)` client.
-- [ ] Keep the same output schema:
-  - [ ] summary
-  - [ ] evidence
-  - [ ] hypothesis
-  - [ ] caveats
-  - [ ] next_steps
-  - [ ] playbook_slug
-  - [ ] playbook_notes
-- [ ] Make prompts describe uncertainty clearly when the log format is only partially understood.
-
-### Done when
-- [ ] User logs get useful AI summaries, not SSH- or Apache-specific wording.
-
----
-
-## Phase 8 — Mapping-based import
-
-- [ ] Add a simple mapping file format later.
-- [ ] Let users define how their fields map to the normalized schema.
-- [ ] Example:
-  - [ ] `client_ip -> src_ip`
-  - [ ] `username -> user`
-  - [ ] `level -> severity`
-  - [ ] `msg -> message`
-- [ ] Support a config file such as:
-  - [ ] YAML
-  - [ ] JSON
-- [ ] Keep this as phase 2 of generic-log usability, not phase 1.
-
-### Done when
-- [ ] Users can bring custom app logs without code changes.
-
----
-
-## Phase 9 — Documentation and samples
-
-- [ ] Add sample generic logs under `data/`.
-- [ ] Add one JSONL example.
-- [ ] Add one syslog-like example.
-- [ ] Add one application log example.
-- [ ] Update README:
-  - [ ] SSH usage
-  - [ ] Apache usage
-  - [ ] generic usage
-  - [ ] Ollama usage
-- [ ] Add a “bring your own log” section.
-
-### Done when
-- [ ] A new user can try the tool on their own logs with minimal guessing.
-
----
-
-## Phase 10 — Safety and trust
-
-- [ ] Never claim certainty when the parser confidence is low.
-- [ ] Surface parser confidence in generic mode.
-- [ ] Keep raw logs available for inspection in outputs.
-- [ ] Validate all imported fields before scoring and AI use.
-- [ ] Redact or warn on clearly sensitive values later.
-- [ ] Make AI explain optional, never mandatory.
-
-### Done when
-- [ ] The tool stays honest and safe even on messy user data.
-
----
-
-## Recommended build order
-
-- [ ] 1. Normalized schema
-- [ ] 2. SSH adapter -> normalized events
-- [ ] 3. Apache adapter -> normalized events
-- [ ] 4. Generic JSONL parser
-- [ ] 5. Generic grouping + feature extraction
-- [ ] 6. Generic explain path
-- [ ] 7. Mapping file support
-- [ ] 8. Docs and samples
-
----
-
-## Product standard
-
-- [ ] AegisLog should become “works on your logs with adapters and normalization”
-- [ ] not “works only on the logs the developer hardcoded”

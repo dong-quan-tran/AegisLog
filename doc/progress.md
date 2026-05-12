@@ -1661,3 +1661,104 @@ Clean up README or CLI help text so explain versus ai-explain is clearly documen
   - JSONL ingestion,
   - and a CLI command to inspect normalized events.
 - You are now one small step away from generic **incidents** (grouping + scoring) and then generic **AI explain** using the same Ollama backend.
+
+Date: 2026-05-12
+Project: AegisLog — generic logs and adapters
+
+1) SSH → normalized adapter
+Implemented aegislog/adapters/ssh.py that:
+
+Reuses the existing parse_ssh_file parser from parsing/auth_ssh.py.
+
+Converts LogEvent records into NormalizedEvent instances.
+
+Derives event_action from message/status (invalid_user, login_failed, login_success, ssh_event, etc.).
+
+Maps SSH auth outcomes into normalized severity (warn for failed/invalid, info for others).
+
+Builds session_hint from ip|user when possible.
+
+Added summarize_ssh_normalized_events(...) to produce counts by severity, action, users, and source IPs.
+
+Verified on data/loghub/SSH.log:
+
+655,147 SSH events normalized.
+
+Reasonable severity/action distributions and session hints present.
+
+2) SSH normalize CLI
+Extended aegislog/cli.py with normalize-ssh command:
+
+python -m aegislog.cli normalize-ssh data/loghub/SSH.log for text summary.
+
+--format json --top N to emit structured { path, source_type, summary, preview }.
+
+Integrates with the new SSH adapter and summary helper.
+
+3) Apache → normalized adapter
+Created aegislog/adapters/apache.py on top of parsing/apache_error.py:
+
+Reuses parse_error_file to parse Apache error logs into LogEvent.
+
+Interprets Apache error level (stored in user_agent today) and maps it to normalized severities:
+
+emerg/alert/crit/error → error
+
+warn → warn
+
+notice/info/debug → info
+
+Derives higher-level event_action values (apache_notice, apache_error, apache_warn, missing_file, service_start, service_shutdown, etc.) from level + message content.
+
+Populates extra with apache_level and parser_source.
+
+Added summarize_apache_normalized_events(...) with counts by severity, action, and Apache level.
+
+Verified on data/loghub/Apache.log:
+
+52,004 Apache events normalized.
+
+Error/notice/warn counts and “missing_file” / “error_spike” style patterns visible in the summaries.
+
+4) Apache normalize CLI
+Extended aegislog/cli.py with normalize-apache command:
+
+python -m aegislog.cli normalize-apache data/loghub/Apache.log.
+
+Same text/JSON output pattern as normalize-ssh.
+
+Updated examples/epilog to point at the correct sample path under data/loghub.
+
+5) Unified normalized incidents
+Introduced aegislog/normalized_loader.py with load_normalized_events(...) that:
+
+For source_type=generic, calls load_generic_jsonl(...).
+
+For source_type=ssh, calls the SSH adapter.
+
+For source_type=apache, calls the Apache adapter.
+
+Added normalized-incidents CLI command to aegislog/cli.py that:
+
+Accepts --source-type {generic, ssh, apache} and --window-minutes.
+
+Loads normalized events via load_normalized_events(...).
+
+Groups them with the existing group_generic_events_to_incidents(...).
+
+Outputs incident summaries in text or JSON, using the same incident model as generic-incidents.
+
+Verified behavior on all three sources:
+
+Generic JSONL: 4 events grouped into 4 small incidents, all using the generic grouping heuristics.
+
+SSH: ~655k events grouped into ~24,716 incidents, with high-volume “warning_burst” incidents for abusive IPs.
+
+Apache: 52k error-log events grouped into ~5,510 incidents, with “error_spike” incidents for heavy error periods on the apache service.
+
+6) Overall impact
+AegisLog now has a real normalized adapter layer for SSH and Apache, plus the existing generic JSONL path.
+
+A single generic grouping pipeline (group_generic_events_to_incidents) is now applied across all three sources via normalized-incidents.
+
+The project has moved from separate, hardcoded pipelines toward a unified “works on your logs via normalization + adapters” architecture, with CLI entrypoints that are ready for users to try on the sample data.
