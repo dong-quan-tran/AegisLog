@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Tuple
+from pathlib import Path
+from typing import List, Tuple
 
 from aegislog.normalized import NormalizedEvent
 from aegislog.parsing.generic import load_generic_jsonl
@@ -10,6 +11,14 @@ from aegislog.adapters.apache import load_apache_normalized_events
 
 class NormalizedLoadError(Exception):
     pass
+
+
+def _ensure_file_exists(path: str) -> None:
+    p = Path(path)
+    if not p.exists():
+        raise NormalizedLoadError(f"Input file not found: {path}")
+    if not p.is_file():
+        raise NormalizedLoadError(f"Input path is not a file: {path}")
 
 
 def load_normalized_events(
@@ -23,9 +32,16 @@ def load_normalized_events(
     Returns (events, parse_errors).
     For SSH and Apache, parse_errors is always [] for now.
     """
+    _ensure_file_exists(path)
+
     source_type = source_type.lower()
 
     if source_type == "generic":
+        if input_format != "jsonl":
+            raise NormalizedLoadError(
+                f"Unsupported input_format {input_format!r} for source_type='generic'. "
+                "Expected: jsonl."
+            )
         events, errors = load_generic_jsonl(path)
         return events, errors
 
