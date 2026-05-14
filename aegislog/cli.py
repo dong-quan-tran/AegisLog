@@ -1,5 +1,7 @@
 import argparse
 import json
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from aegislog.cli_common import write_output, session_row_to_dict
 from aegislog.cli_analyze import register_analyze_parser
@@ -14,7 +16,7 @@ from aegislog.cli_ssh import (
     register_report_parser,
     register_ai_explain_parser,
 )
-from aegislog.parsing.generic import load_generic_jsonl, summarize_normalized_events
+from aegislog.parsing.generic import summarize_normalized_events
 from aegislog.incidents_generic import (
     group_generic_events_to_incidents,
     group_generic_events_to_incident_bundles,
@@ -22,16 +24,15 @@ from aegislog.incidents_generic import (
 )
 from aegislog.ai.prompts_structured import build_structured_incident_analysis_prompt
 from aegislog.ai.client import generate_incident_analysis, LLMError
-from aegislog.adapters.ssh import (
-    load_ssh_normalized_events,
-    summarize_ssh_normalized_events,
-)
-from aegislog.adapters.apache import (
-    load_apache_normalized_events,
-    summarize_apache_normalized_events,
-)
+from aegislog.adapters.ssh import summarize_ssh_normalized_events
+from aegislog.adapters.apache import summarize_apache_normalized_events
 from aegislog.normalized_loader import load_normalized_events, NormalizedLoadError
 from aegislog.incidents_normalized import build_normalized_incident_evidence
+
+try:
+    import yaml  # type: ignore[import-untyped]
+except ImportError:
+    yaml = None
 
 __all__ = [
     "write_output",
@@ -49,20 +50,69 @@ __all__ = [
 ]
 
 
+def _load_mapping_file(path: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not path:
+        return None
+
+    p = Path(path)
+    if not p.exists():
+        raise NormalizedLoadError(f"Mapping file not found: {path}")
+    if not p.is_file():
+        raise NormalizedLoadError(f"Mapping path is not a file: {path}")
+
+    suffix = p.suffix.lower()
+    text = p.read_text(encoding="utf-8")
+
+    if suffix in {".yaml", ".yml"}:
+        if yaml is None:
+            raise NormalizedLoadError(
+                "PyYAML is not installed; cannot load YAML mapping files."
+            )
+        try:
+            data = yaml.safe_load(text) or {}
+        except Exception as e:
+            raise NormalizedLoadError(f"Failed to parse YAML mapping file {path}: {e}")
+        if not isinstance(data, dict):
+            raise NormalizedLoadError(
+                f"Mapping file {path} must contain a top-level object."
+            )
+        return data
+
+    if suffix == ".json":
+        try:
+            data = json.loads(text)
+        except Exception as e:
+            raise NormalizedLoadError(f"Failed to parse JSON mapping file {path}: {e}")
+        if not isinstance(data, dict):
+            raise NormalizedLoadError(
+                f"Mapping file {path} must contain a top-level object."
+            )
+        return data
+
+    raise NormalizedLoadError(
+        f"Unsupported mapping file extension for {path!r}; "
+        "expected .yaml, .yml, or .json."
+    )
+
+
 def cmd_examples(args: argparse.Namespace) -> None:
     print("Example commands:")
     print("  aegislog analyze data/loghub/SSH.log --log-type ssh_auth --profile ssh")
     print("  aegislog incidents data/loghub/SSH.log --log-type ssh_auth")
     print("  aegislog explain data/loghub/SSH.log --log-type ssh_auth --index 0")
     print("  aegislog normalize data/sample_generic.jsonl")
+    print("  aegislog normalize data/sample_generic.jsonl --mapping mapping/example_auth_app.yaml")
     print("  aegislog normalize-ssh data/loghub/SSH.log")
     print("  aegislog normalize-apache data/loghub/Apache.log")
     print("  aegislog generic-incidents data/sample_generic.jsonl")
+    print("  aegislog generic-incidents data/sample_generic.jsonl --mapping mapping/example_auth_app.yaml")
     print("  aegislog generic-explain data/sample_generic.jsonl --index 0 --use-ai")
     print("  aegislog normalized-incidents data/sample_generic.jsonl --source-type generic")
+    print("  aegislog normalized-incidents data/sample_generic.jsonl --source-type generic --mapping mapping/example_auth_app.yaml")
     print("  aegislog normalized-incidents data/loghub/SSH.log --source-type ssh")
     print("  aegislog normalized-incidents data/loghub/Apache.log --source-type apache")
     print("  aegislog normalized-explain data/sample_generic.jsonl --source-type generic --first --use-ai")
+    print("  aegislog normalized-explain data/sample_generic.jsonl --source-type generic --mapping mapping/example_auth_app.yaml --first --use-ai")
     print("  aegislog normalized-explain data/loghub/SSH.log --source-type ssh --index 0 --use-ai")
     print("  aegislog normalized-explain data/loghub/Apache.log --source-type apache --index 0 --use-ai")
 
@@ -79,10 +129,12 @@ def cmd_train(args: argparse.Namespace) -> None:
 
 def cmd_normalize(args: argparse.Namespace) -> int:
     try:
+        mapping = _load_mapping_file(getattr(args, "mapping", None))
         events, errors = load_normalized_events(
             source_type="generic",
             path=args.path,
             input_format=args.input_format,
+            mapping=mapping,
         )
     except NormalizedLoadError as e:
         print(str(e))
@@ -97,6 +149,7 @@ def cmd_normalize(args: argparse.Namespace) -> int:
     payload = {
         "path": args.path,
         "input_format": args.input_format,
+        "mapping": getattr(args, "mapping", None),
         "summary": summary,
         "preview": preview,
         "parse_errors": errors,
@@ -112,6 +165,8 @@ def cmd_normalize(args: argparse.Namespace) -> int:
         return 0
 
     print(f"Normalized {summary['total_events']} event(s) from {args.path}")
+    if getattr(args, "mapping", None):
+        print(f"Using mapping file: {args.mapping}")
     print(f"Previewing first {len(preview)} event(s)")
     if summary["severity_counts"]:
         print(f"Severity counts: {summary['severity_counts']}")
@@ -229,10 +284,12 @@ def cmd_normalize_apache(args: argparse.Namespace) -> int:
 
 def cmd_generic_incidents(args: argparse.Namespace) -> int:
     try:
+        mapping = _load_mapping_file(getattr(args, "mapping", None))
         events, errors = load_normalized_events(
             source_type="generic",
             path=args.path,
             input_format=args.input_format,
+            mapping=mapping,
         )
     except NormalizedLoadError as e:
         print(str(e))
@@ -249,6 +306,7 @@ def cmd_generic_incidents(args: argparse.Namespace) -> int:
     payload = {
         "path": args.path,
         "input_format": args.input_format,
+        "mapping": getattr(args, "mapping", None),
         "window_minutes": args.window_minutes,
         "total_events": len(events),
         "total_incidents": len(incidents),
@@ -266,6 +324,8 @@ def cmd_generic_incidents(args: argparse.Namespace) -> int:
         return 0
 
     print(f"Grouped {len(events)} event(s) into {len(incidents)} generic incident(s)")
+    if getattr(args, "mapping", None):
+        print(f"Using mapping file: {args.mapping}")
     print(f"Showing top {min(len(incidents), args.top)} incident(s)")
 
     if errors:
@@ -289,10 +349,15 @@ def cmd_generic_incidents(args: argparse.Namespace) -> int:
 
 def cmd_normalized_incidents(args: argparse.Namespace) -> int:
     try:
+        mapping = None
+        if args.source_type == "generic":
+            mapping = _load_mapping_file(getattr(args, "mapping", None))
+
         events, errors = load_normalized_events(
             source_type=args.source_type,
             path=args.path,
             input_format=args.input_format,
+            mapping=mapping,
         )
     except NormalizedLoadError as e:
         print(str(e))
@@ -310,6 +375,7 @@ def cmd_normalized_incidents(args: argparse.Namespace) -> int:
         "path": args.path,
         "source_type": args.source_type,
         "input_format": args.input_format,
+        "mapping": getattr(args, "mapping", None),
         "window_minutes": args.window_minutes,
         "total_events": len(events),
         "total_incidents": len(incidents),
@@ -330,6 +396,8 @@ def cmd_normalized_incidents(args: argparse.Namespace) -> int:
         f"Grouped {len(events)} normalized {args.source_type} event(s) into "
         f"{len(incidents)} incident(s)"
     )
+    if args.source_type == "generic" and getattr(args, "mapping", None):
+        print(f"Using mapping file: {args.mapping}")
     print(f"Showing top {min(len(incidents), args.top)} incident(s)")
 
     if errors:
@@ -352,7 +420,21 @@ def cmd_normalized_incidents(args: argparse.Namespace) -> int:
 
 
 def cmd_generic_explain(args: argparse.Namespace) -> int:
-    events, errors = load_generic_jsonl(args.path)
+    try:
+        mapping = _load_mapping_file(getattr(args, "mapping", None))
+        events, errors = load_normalized_events(
+            source_type="generic",
+            path=args.path,
+            input_format=args.input_format,
+            mapping=mapping,
+        )
+    except NormalizedLoadError as e:
+        print(str(e))
+        return 1
+    except Exception as e:
+        print(f"Failed to explain generic incidents: {e}")
+        return 1
+
     bundles = group_generic_events_to_incident_bundles(
         events,
         window_minutes=args.window_minutes,
@@ -393,6 +475,7 @@ def cmd_generic_explain(args: argparse.Namespace) -> int:
     payload = {
         "path": args.path,
         "input_format": args.input_format,
+        "mapping": getattr(args, "mapping", None),
         "window_minutes": args.window_minutes,
         "selected_index": index,
         "incident": incident.to_dict(),
@@ -407,6 +490,8 @@ def cmd_generic_explain(args: argparse.Namespace) -> int:
         return 0
 
     print(f"Explaining generic incident at index {index}: {incident.incident_id}")
+    if getattr(args, "mapping", None):
+        print(f"  using_mapping={args.mapping}")
     print(
         f"  priority={incident.priority} severity={incident.severity} "
         f"confidence={incident.confidence} pattern={incident.attack_pattern} "
@@ -455,10 +540,15 @@ def cmd_generic_explain(args: argparse.Namespace) -> int:
 
 def cmd_normalized_explain(args: argparse.Namespace) -> int:
     try:
+        mapping = None
+        if args.source_type == "generic":
+            mapping = _load_mapping_file(getattr(args, "mapping", None))
+
         events, errors = load_normalized_events(
             source_type=args.source_type,
             path=args.path,
             input_format=args.input_format,
+            mapping=mapping,
         )
     except NormalizedLoadError as e:
         print(str(e))
@@ -507,6 +597,7 @@ def cmd_normalized_explain(args: argparse.Namespace) -> int:
         "path": args.path,
         "source_type": args.source_type,
         "input_format": args.input_format,
+        "mapping": getattr(args, "mapping", None),
         "window_minutes": args.window_minutes,
         "selected_index": index,
         "incident": incident.to_dict(),
@@ -524,6 +615,8 @@ def cmd_normalized_explain(args: argparse.Namespace) -> int:
         f"Explaining normalized incident at index {index}: {incident.incident_id} "
         f"(source_type={args.source_type})"
     )
+    if args.source_type == "generic" and getattr(args, "mapping", None):
+        print(f"  using_mapping={args.mapping}")
     print(
         f"  priority={incident.priority} severity={incident.severity} "
         f"confidence={incident.confidence} pattern={incident.attack_pattern} "
@@ -586,14 +679,18 @@ def build_parser() -> argparse.ArgumentParser:
             "  aegislog explain data/loghub/SSH.log --index 0 --format json --output explain.json\n"
             "  aegislog ai-explain data/loghub/SSH.log --index 0 --format json --output ai-explain.json\n"
             "  aegislog normalize data/sample_generic.jsonl\n"
+            "  aegislog normalize data/sample_generic.jsonl --mapping mapping/example_auth_app.yaml\n"
             "  aegislog normalize-ssh data/loghub/SSH.log\n"
             "  aegislog normalize-apache data/loghub/Apache.log\n"
             "  aegislog generic-incidents data/sample_generic.jsonl\n"
+            "  aegislog generic-incidents data/sample_generic.jsonl --mapping mapping/example_auth_app.yaml\n"
             "  aegislog generic-explain data/sample_generic.jsonl --index 0 --use-ai\n"
             "  aegislog normalized-incidents data/sample_generic.jsonl --source-type generic\n"
+            "  aegislog normalized-incidents data/sample_generic.jsonl --source-type generic --mapping mapping/example_auth_app.yaml\n"
             "  aegislog normalized-incidents data/loghub/SSH.log --source-type ssh\n"
             "  aegislog normalized-incidents data/loghub/Apache.log --source-type apache\n"
             "  aegislog normalized-explain data/sample_generic.jsonl --source-type generic --first --use-ai\n"
+            "  aegislog normalized-explain data/sample_generic.jsonl --source-type generic --mapping mapping/example_auth_app.yaml --first --use-ai\n"
             "  aegislog normalized-explain data/loghub/SSH.log --source-type ssh --index 0 --use-ai\n"
             "  aegislog normalized-explain data/loghub/Apache.log --source-type apache --index 0 --use-ai\n"
         ),
@@ -612,6 +709,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["jsonl"],
         default="jsonl",
         help="Input format for generic logs.",
+    )
+    p_normalize.add_argument(
+        "--mapping",
+        help="Optional YAML/JSON mapping file describing how source fields map into the normalized event schema.",
     )
     p_normalize.add_argument(
         "--top",
@@ -689,6 +790,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Input format for generic logs.",
     )
     p_generic_incidents.add_argument(
+        "--mapping",
+        help="Optional YAML/JSON mapping file to influence normalization of generic logs.",
+    )
+    p_generic_incidents.add_argument(
         "--window-minutes",
         type=int,
         default=15,
@@ -730,6 +835,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Input format for generic logs (ignored for ssh/apache).",
     )
     p_norm_inc.add_argument(
+        "--mapping",
+        help="Optional YAML/JSON mapping file for source_type=generic.",
+    )
+    p_norm_inc.add_argument(
         "--window-minutes",
         type=int,
         default=15,
@@ -763,6 +872,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["jsonl"],
         default="jsonl",
         help="Input format for generic logs.",
+    )
+    p_generic_explain.add_argument(
+        "--mapping",
+        help="Optional YAML/JSON mapping file to influence normalization of generic logs.",
     )
     p_generic_explain.add_argument(
         "--window-minutes",
@@ -814,6 +927,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["jsonl"],
         default="jsonl",
         help="Input format for generic logs (ignored for ssh/apache).",
+    )
+    p_norm_explain.add_argument(
+        "--mapping",
+        help="Optional YAML/JSON mapping file for source_type=generic.",
     )
     p_norm_explain.add_argument(
         "--window-minutes",
