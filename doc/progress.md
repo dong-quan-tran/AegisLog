@@ -1945,3 +1945,30 @@ python -m aegislog.cli normalized-incidents data/loghub/Apache.log --source-type
 python -m aegislog.cli normalized-explain data/loghub/Apache.log --source-type apache --index 0 --use-ai:
 
 Critical, high-error incidents get structured AI explanations using the normalized evidence.
+
+Progress log: 05/14/2026
+Apache work
+Fixed the Apache parser/CLI mismatch that was breaking test collection.
+
+Restored the correct Apache CLI import path and behavior.
+
+Updated Apache parser tests to match the current parser contract.
+
+Fixed JSON-output behavior so empty filtered results still produce valid machine-readable output where needed.
+
+Generic log ingestion
+Added mappings.py for loading JSON or YAML field mappings.
+
+Added jsonl_generic.py for config-driven JSONL normalization into NormalizedEvent.
+
+Adjusted tests to match the real normalized schema instead of assuming a source attribute that doesn’t exist.
+
+Got the new mapping and JSONL parser tests passing after aligning them with the actual model behavior.
+
+Project direction
+Narrowed the next milestone to the remaining high-value pieces: CLI wiring, syslog input, docs, examples, and final incident/AI flow cleanup.
+
+Confirmed the project now has the foundation for bring-your-own structured logs, with JSONL as the first generic format. JSONL is especially suitable for logs because each line is an independent valid JSON value.
+
+Project status
+You’re past the “core architecture is unclear” stage and into the “finish integration and polish” stage. The remaining work is real, but it’s mostly bounded implementation and documentation rather than deep redesign.
