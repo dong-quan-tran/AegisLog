@@ -45,7 +45,20 @@ def _map_severity(level: Optional[str]) -> str:
         return "error"
     if level in {"warn", "warning"}:
         return "warn"
-    if level in {"notice", "info", "debug", "trace", "trace1", "trace2", "trace3", "trace4", "trace5", "trace6", "trace7", "trace8"}:
+    if level in {
+        "notice",
+        "info",
+        "debug",
+        "trace",
+        "trace1",
+        "trace2",
+        "trace3",
+        "trace4",
+        "trace5",
+        "trace6",
+        "trace7",
+        "trace8",
+    }:
         return "info"
     return "info"
 
@@ -76,13 +89,14 @@ def _map_event_action(level: Optional[str], raw_message: str) -> str:
 
 
 def apache_record_to_normalized_event(record: Any) -> NormalizedEvent:
-    raw_message = _coerce_text(_get_attr(record, "raw", "message", "raw_message")) or ""
+    raw_message = _coerce_text(_get_attr(record, "raw")) or ""
+    message = _coerce_text(_get_attr(record, "message")) or raw_message
     timestamp = _coerce_timestamp(_get_attr(record, "timestamp", "ts", "time"))
-    level = _coerce_text(_get_attr(record, "user_agent", "level"))
+    level = _coerce_text(_get_attr(record, "level"))
     source = _coerce_text(_get_attr(record, "source")) or "apache_error"
 
     severity = _map_severity(level)
-    event_action = _map_event_action(level, raw_message)
+    event_action = _map_event_action(level, message)
 
     extra = {}
     if level is not None:
@@ -103,7 +117,7 @@ def apache_record_to_normalized_event(record: Any) -> NormalizedEvent:
         host=None,
         service="apache",
         status_code=None,
-        message=raw_message,
+        message=message,
         session_hint=None,
         extra=extra,
     )
