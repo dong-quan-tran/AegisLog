@@ -78,7 +78,18 @@ def cmd_train(args: argparse.Namespace) -> None:
 
 
 def cmd_normalize(args: argparse.Namespace) -> int:
-    events, errors = load_generic_jsonl(args.path)
+    try:
+        events, errors = load_normalized_events(
+            source_type="generic",
+            path=args.path,
+            input_format=args.input_format,
+        )
+    except NormalizedLoadError as e:
+        print(str(e))
+        return 1
+    except Exception as e:
+        print(f"Failed to normalize generic log: {e}")
+        return 1
 
     preview = [event.to_dict() for event in events[: args.top]]
     summary = summarize_normalized_events(events)
@@ -122,7 +133,19 @@ def cmd_normalize(args: argparse.Namespace) -> int:
 
 
 def cmd_normalize_ssh(args: argparse.Namespace) -> int:
-    events = load_ssh_normalized_events(args.path)
+    try:
+        events, _ = load_normalized_events(
+            source_type="ssh",
+            path=args.path,
+            input_format="jsonl",
+        )
+    except NormalizedLoadError as e:
+        print(str(e))
+        return 1
+    except Exception as e:
+        print(f"Failed to normalize SSH log: {e}")
+        return 1
+
     preview = [event.to_dict() for event in events[: args.top]]
     summary = summarize_ssh_normalized_events(events)
 
@@ -158,7 +181,19 @@ def cmd_normalize_ssh(args: argparse.Namespace) -> int:
 
 
 def cmd_normalize_apache(args: argparse.Namespace) -> int:
-    events = load_apache_normalized_events(args.path)
+    try:
+        events, _ = load_normalized_events(
+            source_type="apache",
+            path=args.path,
+            input_format="jsonl",
+        )
+    except NormalizedLoadError as e:
+        print(str(e))
+        return 1
+    except Exception as e:
+        print(f"Failed to normalize Apache log: {e}")
+        return 1
+
     preview = [event.to_dict() for event in events[: args.top]]
     summary = summarize_apache_normalized_events(events)
 
@@ -193,7 +228,19 @@ def cmd_normalize_apache(args: argparse.Namespace) -> int:
 
 
 def cmd_generic_incidents(args: argparse.Namespace) -> int:
-    events, errors = load_generic_jsonl(args.path)
+    try:
+        events, errors = load_normalized_events(
+            source_type="generic",
+            path=args.path,
+            input_format=args.input_format,
+        )
+    except NormalizedLoadError as e:
+        print(str(e))
+        return 1
+    except Exception as e:
+        print(f"Failed to group generic incidents: {e}")
+        return 1
+
     incidents = group_generic_events_to_incidents(
         events,
         window_minutes=args.window_minutes,
@@ -249,6 +296,9 @@ def cmd_normalized_incidents(args: argparse.Namespace) -> int:
         )
     except NormalizedLoadError as e:
         print(str(e))
+        return 1
+    except Exception as e:
+        print(f"Failed to group normalized incidents: {e}")
         return 1
 
     incidents = group_generic_events_to_incidents(
