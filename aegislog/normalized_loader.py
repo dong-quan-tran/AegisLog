@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from aegislog.normalized import NormalizedEvent
 from aegislog.parsing.generic import load_generic_jsonl
@@ -25,6 +25,7 @@ def load_normalized_events(
     source_type: str,
     path: str,
     input_format: str = "jsonl",
+    mapping: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[NormalizedEvent], list[str]]:
     """
     Load normalized events from a path for a given logical source_type.
@@ -42,7 +43,7 @@ def load_normalized_events(
                 f"Unsupported input_format {input_format!r} for source_type='generic'. "
                 "Expected: jsonl."
             )
-        events, errors = load_generic_jsonl(path)
+        events, errors = load_generic_jsonl(path, mapping=mapping)
         return events, errors
 
     if source_type == "ssh":
