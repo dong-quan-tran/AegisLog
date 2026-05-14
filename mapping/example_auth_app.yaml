@@ -1,0 +1,61 @@
+source_type: generic_jsonl
+description: Example mapping for mixed auth and application JSONL logs
+
+fields:
+  timestamp:
+    - "@timestamp"
+    - "timestamp"
+    - "time"
+    - "ts"
+
+  message:
+    - "message"
+    - "msg"
+    - "log_message"
+
+  severity:
+    - "severity"
+    - "level"
+    - "log_level"
+
+  event_category:
+    - "event_category"
+    - "category"
+
+  event_action:
+    - "event_action"
+    - "action"
+    - "event_type"
+
+  src_ip:
+    - "src_ip"
+    - "client_ip"
+    - "source_ip"
+
+  dst_ip:
+    - "dst_ip"
+    - "destination_ip"
+
+  user:
+    - "user"
+    - "username"
+    - "principal"
+
+  host:
+    - "host"
+    - "hostname"
+
+  service:
+    - "service"
+    - "app"
+    - "application"
+
+  status_code:
+    - "status"
+    - "status_code"
+    - "http_status"
+
+  session_hint:
+    - "session_id"
+    - "trace_id"
+    - "request_id"
