@@ -318,6 +318,12 @@ def _report_apache_sessions(args: argparse.Namespace, df) -> int:
     df_sorted = _sorted_apache_df(filtered, top=args.top)
 
     if df_sorted.empty:
+        if getattr(args, "format", "text") == "json":
+            payload = _build_apache_report_payload(df_sorted)
+            data = json.dumps(payload, indent=2)
+            write_output(data, getattr(args, "output", None))
+            return 0
+
         print("No sessions found after filtering.")
         return 0
 
@@ -457,6 +463,11 @@ def main(argv: List[str] | None = None) -> int:
     df_sorted = _sorted_apache_df(filtered, top=args.top)
 
     if df_sorted.empty:
+        if getattr(args, "format", "text") == "json":
+            data = json.dumps([], indent=2)
+            write_output(data, getattr(args, "output", None))
+            return 0
+
         print("No sessions found after filtering.")
         return 0
 
@@ -475,8 +486,7 @@ def main(argv: List[str] | None = None) -> int:
     for _, row in df_sorted.iterrows():
         summary = summarize_apache_row(row)
         print(
-            f"{summary.session_id}  "
-            f"score={summary.score:.3f}  "
+            f"{summary.session_id}  score={summary.score:.3f}  "
             f"errors={summary.error_ratio:.2f}  "
             f"5xx_burst={summary.apache_5xx_burst_max_per_minute}  "
             f"notes: {summary.apache_notes}"
