@@ -1762,3 +1762,186 @@ AegisLog now has a real normalized adapter layer for SSH and Apache, plus the ex
 A single generic grouping pipeline (group_generic_events_to_incidents) is now applied across all three sources via normalized-incidents.
 
 The project has moved from separate, hardcoded pipelines toward a unified “works on your logs via normalization + adapters” architecture, with CLI entrypoints that are ready for users to try on the sample data.
+
+Progress log for today (2026-05-13)
+You can paste this into your project log.
+
+Date: 2026-05-13
+Project: AegisLog — normalized explain + adapter polish
+
+1) Normalized incident AI explain
+Added a normalized incident evidence model:
+
+Created aegislog/incidents_normalized.py with NormalizedIncidentEvidence dataclass capturing source_type, input_format, window_minutes, incident, and the list of normalized events.
+
+Implemented to_dict() for JSON/AI consumption and build_normalized_incident_evidence(...) helper to build evidence from grouped incident bundles.
+
+Introduced normalized-explain CLI:
+
+Extended aegislog/cli.py with normalized-explain command.
+
+Command accepts --source-type {generic, ssh, apache}, --window-minutes, --index / --first, --use-ai, --format, --output.
+
+Loads normalized events via load_normalized_events(...).
+
+Groups them with group_generic_events_to_incident_bundles(...).
+
+Selects a bundle by index or --first and builds NormalizedIncidentEvidence.
+
+Calls the AI backend when --use-ai is set, with graceful handling of LLMError (prints “AI analysis unavailable” instead of a traceback).
+
+Text mode prints human-readable incident info plus AI summary/evidence/hypothesis/caveats/next_steps.
+
+JSON mode emits a structured payload with incident, incident_evidence, and optional ai_analysis.
+
+Verified normalized-explain end-to-end:
+
+python -m aegislog.cli normalized-explain data/sample_generic.jsonl --source-type generic --first --use-ai
+
+python -m aegislog.cli normalized-explain data/loghub/SSH.log --source-type ssh --index 0 --use-ai
+
+python -m aegislog.cli normalized-explain data/loghub/Apache.log --source-type apache --index 0 --use-ai
+
+All three produce structured, mock-backed AI explanations with summary, bullet evidence, hypothesis, caveats, next_steps, and optional playbook_* fields.
+
+2) Structured prompt layer for normalized incidents
+Added aegislog/ai/prompts_structured.py:
+
+Implemented build_structured_incident_analysis_prompt(evidence) returning a dict payload, not a string, to match generate_incident_analysis(...)’s existing expectations.
+
+Payload includes source_type, input_format, window_minutes, incident, full events, an events_sample, and counts.
+
+Includes an instructions block with task description, expected response schema (summary/evidence/hypothesis/caveats/next_steps/playbook_*), and guidance on conservative language.
+
+Updated CLI explain paths to use the new structured prompt:
+
+Replaced previous prompt calls with build_structured_incident_analysis_prompt(evidence) in both generic-explain and normalized-explain.
+
+Confirmed compatibility with the existing mock AI client, which expects a dict and looks at prompt["incident"] and prompt["events"].
+
+3) Friendly error handling for normalize / incidents
+Improved normalized loader with basic validation:
+
+Updated aegislog/normalized_loader.py:
+
+Added _ensure_file_exists(path) using pathlib.Path to check for existence and file type.
+
+Raised NormalizedLoadError for missing or non-file paths.
+
+Validated input_format for source_type="generic" (jsonl only for now).
+
+Continued to support source_type values generic, ssh, apache; raises NormalizedLoadError for unsupported types.
+
+Added friendly CLI error messages in aegislog/cli.py:
+
+cmd_normalize, cmd_normalize_ssh, cmd_normalize_apache, cmd_generic_incidents, and cmd_normalized_incidents now:
+
+Catch NormalizedLoadError and print a clear message (e.g., Input file not found: does-not-exist.log).
+
+Catch unexpected exceptions and print a short “Failed to ...” message instead of a raw traceback.
+
+Verified behavior:
+
+python -m aegislog.cli normalize does-not-exist.jsonl
+
+python -m aegislog.cli normalize-ssh does-not-exist.log
+
+python -m aegislog.cli normalize-apache does-not-exist.log
+
+python -m aegislog.cli generic-incidents does-not-exist.jsonl
+
+python -m aegislog.cli normalized-incidents does-not-exist.log --source-type ssh
+
+All print one-line, user-friendly errors with no stack traces.
+
+4) SSH and Apache adapter tests
+Added SSH adapter tests (tests/test_adapters_ssh.py):
+
+test_ssh_failed_password_normalizes_expected_fields verifies:
+
+event_action="login_failed" and severity="warn" for a failed password line.
+
+ISO-8601 timestamp, source_type="ssh", event_category="auth".
+
+src_ip, user, service, status_code, and session_hint (ip|user) are populated correctly.
+
+extra is empty when optional HTTP-ish fields are absent.
+
+test_ssh_accepts_publickey_as_login_success verifies:
+
+event_action="login_success" and severity="info" for an “Accepted publickey” line.
+
+Proper timestamp coercion from string.
+
+extra contains method, path, and user_agent.
+
+Added Apache adapter tests (tests/test_adapters_apache.py):
+
+test_apache_missing_file_normalizes_expected_fields verifies:
+
+event_action="missing_file" and severity="error" for “File does not exist”.
+
+ISO-8601 timestamp, source_type="apache", event_category="application", service="apache".
+
+extra["apache_level"] and extra["parser_source"] are set.
+
+test_apache_notice_resuming_operations_maps_to_service_start verifies:
+
+Notice-level “resuming normal operations” maps to event_action="service_start" and severity="info".
+
+apache_level and parser_source are preserved in extra.
+
+Ran tests:
+
+pytest tests/test_adapters_ssh.py tests/test_adapters_apache.py passes (4 tests).
+
+5) Apache error parser cleanup
+Refined Apache error parser (aegislog/parsing/apache_error.py):
+
+Regex still parses [time] [level] message.
+
+Now keeps:
+
+level as a dedicated attribute on the returned LogEvent (event.level).
+
+message as event.message (stripped message body).
+
+Leaves user_agent=None instead of overloading it.
+
+Parser continues to attach the original line as raw and source="apache_error".
+
+Updated Apache adapter (aegislog/adapters/apache.py) to use the cleaner parser:
+
+Reads raw_message from record.raw, message from record.message, and level from record.level.
+
+Uses parsed message (not the full raw line) as NormalizedEvent.message while keeping raw_message as the original line.
+
+Severity mapping and event_action inference now use level + message:
+
+“resuming normal operations” → service_start.
+
+“caught SIGTERM” / “shutting down” → service_shutdown.
+
+“file does not exist” → missing_file.
+
+Error/warn/notice/etc. map to apache_error, apache_warn, apache_notice where no special pattern is matched.
+
+extra["apache_level"] and extra["parser_source"] are populated from the parsed record.
+
+Re-verified Apache flows:
+
+python -m aegislog.cli normalize-apache data/loghub/Apache.log:
+
+52,004 events normalized.
+
+Reasonable severity distribution and apache_notice / missing_file / apache_error / service_start / service_shutdown counts.
+
+Preview shows message stripped to just the body, with apache_level and parser_source in extra.
+
+python -m aegislog.cli normalized-incidents data/loghub/Apache.log --source-type apache:
+
+5,510 incidents, with top incidents being error_spike on service:apache.
+
+python -m aegislog.cli normalized-explain data/loghub/Apache.log --source-type apache --index 0 --use-ai:
+
+Critical, high-error incidents get structured AI explanations using the normalized evidence.
