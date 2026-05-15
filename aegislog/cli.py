@@ -26,7 +26,6 @@ from aegislog.adapters.ssh import summarize_ssh_normalized_events
 from aegislog.adapters.apache import summarize_apache_normalized_events
 from aegislog.normalized_loader import load_normalized_events, NormalizedLoadError
 from aegislog.incidents_normalized import build_normalized_incident_evidence
-from aegislog.mappings import load_mapping_file
 
 __all__ = [
     "write_output",
@@ -51,17 +50,23 @@ def cmd_examples(args: argparse.Namespace) -> None:
     print("  aegislog explain data/loghub/SSH.log --log-type ssh_auth --index 0")
     print("  aegislog normalize data/sample_generic.jsonl")
     print("  aegislog normalize data/sample_generic.jsonl --mapping mapping/example_auth_app.yaml")
+    print("  aegislog normalize data/sample_syslog.log --input-format syslog")
     print("  aegislog normalize-ssh data/loghub/SSH.log")
     print("  aegislog normalize-apache data/loghub/Apache.log")
     print("  aegislog generic-incidents data/sample_generic.jsonl")
     print("  aegislog generic-incidents data/sample_generic.jsonl --mapping mapping/example_auth_app.yaml")
+    print("  aegislog generic-incidents data/sample_syslog.log --input-format syslog")
     print("  aegislog generic-explain data/sample_generic.jsonl --index 0 --use-ai")
+    print("  aegislog generic-explain data/sample_generic.jsonl --mapping mapping/example_auth_app.yaml --index 0 --use-ai")
+    print("  aegislog generic-explain data/sample_syslog.log --input-format syslog --index 0 --use-ai")
     print("  aegislog normalized-incidents data/sample_generic.jsonl --source-type generic")
     print("  aegislog normalized-incidents data/sample_generic.jsonl --source-type generic --mapping mapping/example_auth_app.yaml")
+    print("  aegislog normalized-incidents data/sample_syslog.log --source-type generic --input-format syslog")
     print("  aegislog normalized-incidents data/loghub/SSH.log --source-type ssh")
     print("  aegislog normalized-incidents data/loghub/Apache.log --source-type apache")
     print("  aegislog normalized-explain data/sample_generic.jsonl --source-type generic --first --use-ai")
     print("  aegislog normalized-explain data/sample_generic.jsonl --source-type generic --mapping mapping/example_auth_app.yaml --first --use-ai")
+    print("  aegislog normalized-explain data/sample_syslog.log --source-type generic --input-format syslog --first --use-ai")
     print("  aegislog normalized-explain data/loghub/SSH.log --source-type ssh --index 0 --use-ai")
     print("  aegislog normalized-explain data/loghub/Apache.log --source-type apache --index 0 --use-ai")
 
@@ -78,12 +83,11 @@ def cmd_train(args: argparse.Namespace) -> None:
 
 def cmd_normalize(args: argparse.Namespace) -> int:
     try:
-        mapping = load_mapping_file(getattr(args, "mapping", None))
         events, errors = load_normalized_events(
             source_type="generic",
             path=args.path,
             input_format=args.input_format,
-            mapping=mapping,
+            mapping_path=getattr(args, "mapping", None),
         )
     except NormalizedLoadError as e:
         print(str(e))
@@ -233,12 +237,11 @@ def cmd_normalize_apache(args: argparse.Namespace) -> int:
 
 def cmd_generic_incidents(args: argparse.Namespace) -> int:
     try:
-        mapping = load_mapping_file(getattr(args, "mapping", None))
         events, errors = load_normalized_events(
             source_type="generic",
             path=args.path,
             input_format=args.input_format,
-            mapping=mapping,
+            mapping_path=getattr(args, "mapping", None),
         )
     except NormalizedLoadError as e:
         print(str(e))
@@ -298,15 +301,13 @@ def cmd_generic_incidents(args: argparse.Namespace) -> int:
 
 def cmd_normalized_incidents(args: argparse.Namespace) -> int:
     try:
-        mapping = None
-        if args.source_type == "generic":
-            mapping = load_mapping_file(getattr(args, "mapping", None))
+        mapping_path = getattr(args, "mapping", None) if args.source_type == "generic" else None
 
         events, errors = load_normalized_events(
             source_type=args.source_type,
             path=args.path,
             input_format=args.input_format,
-            mapping=mapping,
+            mapping_path=mapping_path,
         )
     except NormalizedLoadError as e:
         print(str(e))
@@ -370,12 +371,11 @@ def cmd_normalized_incidents(args: argparse.Namespace) -> int:
 
 def cmd_generic_explain(args: argparse.Namespace) -> int:
     try:
-        mapping = load_mapping_file(getattr(args, "mapping", None))
         events, errors = load_normalized_events(
             source_type="generic",
             path=args.path,
             input_format=args.input_format,
-            mapping=mapping,
+            mapping_path=getattr(args, "mapping", None),
         )
     except NormalizedLoadError as e:
         print(str(e))
@@ -489,18 +489,19 @@ def cmd_generic_explain(args: argparse.Namespace) -> int:
 
 def cmd_normalized_explain(args: argparse.Namespace) -> int:
     try:
-        mapping = None
-        if args.source_type == "generic":
-            mapping = load_mapping_file(getattr(args, "mapping", None))
+        mapping_path = getattr(args, "mapping", None) if args.source_type == "generic" else None
 
         events, errors = load_normalized_events(
             source_type=args.source_type,
             path=args.path,
             input_format=args.input_format,
-            mapping=mapping,
+            mapping_path=mapping_path,
         )
     except NormalizedLoadError as e:
         print(str(e))
+        return 1
+    except Exception as e:
+        print(f"Failed to explain normalized incidents: {e}")
         return 1
 
     bundles = group_generic_events_to_incident_bundles(
@@ -629,17 +630,23 @@ def build_parser() -> argparse.ArgumentParser:
             "  aegislog ai-explain data/loghub/SSH.log --index 0 --format json --output ai-explain.json\n"
             "  aegislog normalize data/sample_generic.jsonl\n"
             "  aegislog normalize data/sample_generic.jsonl --mapping mapping/example_auth_app.yaml\n"
+            "  aegislog normalize data/sample_syslog.log --input-format syslog\n"
             "  aegislog normalize-ssh data/loghub/SSH.log\n"
             "  aegislog normalize-apache data/loghub/Apache.log\n"
             "  aegislog generic-incidents data/sample_generic.jsonl\n"
             "  aegislog generic-incidents data/sample_generic.jsonl --mapping mapping/example_auth_app.yaml\n"
+            "  aegislog generic-incidents data/sample_syslog.log --input-format syslog\n"
             "  aegislog generic-explain data/sample_generic.jsonl --index 0 --use-ai\n"
+            "  aegislog generic-explain data/sample_generic.jsonl --mapping mapping/example_auth_app.yaml --index 0 --use-ai\n"
+            "  aegislog generic-explain data/sample_syslog.log --input-format syslog --index 0 --use-ai\n"
             "  aegislog normalized-incidents data/sample_generic.jsonl --source-type generic\n"
             "  aegislog normalized-incidents data/sample_generic.jsonl --source-type generic --mapping mapping/example_auth_app.yaml\n"
+            "  aegislog normalized-incidents data/sample_syslog.log --source-type generic --input-format syslog\n"
             "  aegislog normalized-incidents data/loghub/SSH.log --source-type ssh\n"
             "  aegislog normalized-incidents data/loghub/Apache.log --source-type apache\n"
             "  aegislog normalized-explain data/sample_generic.jsonl --source-type generic --first --use-ai\n"
             "  aegislog normalized-explain data/sample_generic.jsonl --source-type generic --mapping mapping/example_auth_app.yaml --first --use-ai\n"
+            "  aegislog normalized-explain data/sample_syslog.log --source-type generic --input-format syslog --first --use-ai\n"
             "  aegislog normalized-explain data/loghub/SSH.log --source-type ssh --index 0 --use-ai\n"
             "  aegislog normalized-explain data/loghub/Apache.log --source-type apache --index 0 --use-ai\n"
         ),
@@ -650,7 +657,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_normalize = subparsers.add_parser(
         "normalize",
-        help="Normalize a user-provided generic JSONL log into AegisLog's common event schema.",
+        help="Normalize a user-provided generic JSONL or syslog log into AegisLog's common event schema.",
     )
     p_normalize.add_argument("path", help="Path to the input log file.")
     p_normalize.add_argument(
@@ -729,7 +736,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_generic_incidents = subparsers.add_parser(
         "generic-incidents",
-        help="Group normalized generic JSONL events into simple generic incidents.",
+        help="Group normalized generic JSONL or syslog events into simple generic incidents.",
     )
     p_generic_incidents.add_argument("path", help="Path to the input log file.")
     p_generic_incidents.add_argument(
@@ -768,7 +775,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_norm_inc = subparsers.add_parser(
         "normalized-incidents",
-        help="Group normalized events from generic/ssh/apache into incidents.",
+        help="Group normalized events from generic, SSH, or Apache logs into incidents.",
     )
     p_norm_inc.add_argument("path", help="Path to the input log file.")
     p_norm_inc.add_argument(
@@ -862,7 +869,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_norm_explain = subparsers.add_parser(
         "normalized-explain",
-        help="Generate structured explanation for a normalized incident from generic/ssh/apache sources.",
+        help="Generate structured explanation for a normalized incident from generic, SSH, or Apache sources.",
     )
     p_norm_explain.add_argument("path", help="Path to the input log file.")
     p_norm_explain.add_argument(
