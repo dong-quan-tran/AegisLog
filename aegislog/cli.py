@@ -1,7 +1,5 @@
 import argparse
 import json
-from pathlib import Path
-from typing import Any, Dict, Optional
 
 from aegislog.cli_common import write_output, session_row_to_dict
 from aegislog.cli_analyze import register_analyze_parser
@@ -28,11 +26,7 @@ from aegislog.adapters.ssh import summarize_ssh_normalized_events
 from aegislog.adapters.apache import summarize_apache_normalized_events
 from aegislog.normalized_loader import load_normalized_events, NormalizedLoadError
 from aegislog.incidents_normalized import build_normalized_incident_evidence
-
-try:
-    import yaml  # type: ignore[import-untyped]
-except ImportError:
-    yaml = None
+from aegislog.mappings import load_mapping_file
 
 __all__ = [
     "write_output",
@@ -48,51 +42,6 @@ __all__ = [
     "cmd_report",
     "main",
 ]
-
-
-def _load_mapping_file(path: Optional[str]) -> Optional[Dict[str, Any]]:
-    if not path:
-        return None
-
-    p = Path(path)
-    if not p.exists():
-        raise NormalizedLoadError(f"Mapping file not found: {path}")
-    if not p.is_file():
-        raise NormalizedLoadError(f"Mapping path is not a file: {path}")
-
-    suffix = p.suffix.lower()
-    text = p.read_text(encoding="utf-8")
-
-    if suffix in {".yaml", ".yml"}:
-        if yaml is None:
-            raise NormalizedLoadError(
-                "PyYAML is not installed; cannot load YAML mapping files."
-            )
-        try:
-            data = yaml.safe_load(text) or {}
-        except Exception as e:
-            raise NormalizedLoadError(f"Failed to parse YAML mapping file {path}: {e}")
-        if not isinstance(data, dict):
-            raise NormalizedLoadError(
-                f"Mapping file {path} must contain a top-level object."
-            )
-        return data
-
-    if suffix == ".json":
-        try:
-            data = json.loads(text)
-        except Exception as e:
-            raise NormalizedLoadError(f"Failed to parse JSON mapping file {path}: {e}")
-        if not isinstance(data, dict):
-            raise NormalizedLoadError(
-                f"Mapping file {path} must contain a top-level object."
-            )
-        return data
-
-    raise NormalizedLoadError(
-        f"Unsupported mapping file extension for {path!r}; "
-        "expected .yaml, .yml, or .json."
-    )
 
 
 def cmd_examples(args: argparse.Namespace) -> None:
@@ -129,7 +78,7 @@ def cmd_train(args: argparse.Namespace) -> None:
 
 def cmd_normalize(args: argparse.Namespace) -> int:
     try:
-        mapping = _load_mapping_file(getattr(args, "mapping", None))
+        mapping = load_mapping_file(getattr(args, "mapping", None))
         events, errors = load_normalized_events(
             source_type="generic",
             path=args.path,
@@ -284,7 +233,7 @@ def cmd_normalize_apache(args: argparse.Namespace) -> int:
 
 def cmd_generic_incidents(args: argparse.Namespace) -> int:
     try:
-        mapping = _load_mapping_file(getattr(args, "mapping", None))
+        mapping = load_mapping_file(getattr(args, "mapping", None))
         events, errors = load_normalized_events(
             source_type="generic",
             path=args.path,
@@ -351,7 +300,7 @@ def cmd_normalized_incidents(args: argparse.Namespace) -> int:
     try:
         mapping = None
         if args.source_type == "generic":
-            mapping = _load_mapping_file(getattr(args, "mapping", None))
+            mapping = load_mapping_file(getattr(args, "mapping", None))
 
         events, errors = load_normalized_events(
             source_type=args.source_type,
@@ -421,7 +370,7 @@ def cmd_normalized_incidents(args: argparse.Namespace) -> int:
 
 def cmd_generic_explain(args: argparse.Namespace) -> int:
     try:
-        mapping = _load_mapping_file(getattr(args, "mapping", None))
+        mapping = load_mapping_file(getattr(args, "mapping", None))
         events, errors = load_normalized_events(
             source_type="generic",
             path=args.path,
@@ -542,7 +491,7 @@ def cmd_normalized_explain(args: argparse.Namespace) -> int:
     try:
         mapping = None
         if args.source_type == "generic":
-            mapping = _load_mapping_file(getattr(args, "mapping", None))
+            mapping = load_mapping_file(getattr(args, "mapping", None))
 
         events, errors = load_normalized_events(
             source_type=args.source_type,
@@ -706,7 +655,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_normalize.add_argument("path", help="Path to the input log file.")
     p_normalize.add_argument(
         "--input-format",
-        choices=["jsonl"],
+        choices=["jsonl", "syslog"],
         default="jsonl",
         help="Input format for generic logs.",
     )
@@ -785,7 +734,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_generic_incidents.add_argument("path", help="Path to the input log file.")
     p_generic_incidents.add_argument(
         "--input-format",
-        choices=["jsonl"],
+        choices=["jsonl", "syslog"],
         default="jsonl",
         help="Input format for generic logs.",
     )
@@ -830,7 +779,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_norm_inc.add_argument(
         "--input-format",
-        choices=["jsonl"],
+        choices=["jsonl", "syslog"],
         default="jsonl",
         help="Input format for generic logs (ignored for ssh/apache).",
     )
@@ -869,7 +818,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_generic_explain.add_argument("path", help="Path to the input log file.")
     p_generic_explain.add_argument(
         "--input-format",
-        choices=["jsonl"],
+        choices=["jsonl", "syslog"],
         default="jsonl",
         help="Input format for generic logs.",
     )
@@ -924,7 +873,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_norm_explain.add_argument(
         "--input-format",
-        choices=["jsonl"],
+        choices=["jsonl", "syslog"],
         default="jsonl",
         help="Input format for generic logs (ignored for ssh/apache).",
     )
