@@ -4,9 +4,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from aegislog.normalized import NormalizedEvent
-from aegislog.parsing.generic import load_generic_jsonl
 from aegislog.adapters.ssh import load_ssh_normalized_events
 from aegislog.adapters.apache import load_apache_normalized_events
+from aegislog.mappings import load_mapping_file
+from aegislog.parsing.generic import load_generic_jsonl
+from aegislog.parsing.jsonl_generic import parse_jsonl_with_mapping
 
 
 class NormalizedLoadError(Exception):
@@ -21,11 +23,28 @@ def _ensure_file_exists(path: str) -> None:
         raise NormalizedLoadError(f"Input path is not a file: {path}")
 
 
+def _resolve_mapping(
+    mapping: Optional[Dict[str, Any]] = None,
+    mapping_path: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    if mapping is not None and mapping_path is not None:
+        raise NormalizedLoadError("Pass either mapping or mapping_path, not both.")
+
+    if mapping_path is not None:
+        try:
+            return load_mapping_file(mapping_path)
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise NormalizedLoadError(f"Failed to load mapping file: {exc}") from exc
+
+    return mapping
+
+
 def load_normalized_events(
     source_type: str,
     path: str,
     input_format: str = "jsonl",
     mapping: Optional[Dict[str, Any]] = None,
+    mapping_path: Optional[str] = None,
 ) -> Tuple[List[NormalizedEvent], list[str]]:
     """
     Load normalized events from a path for a given logical source_type.
@@ -36,6 +55,7 @@ def load_normalized_events(
     _ensure_file_exists(path)
 
     source_type = source_type.lower()
+    resolved_mapping = _resolve_mapping(mapping=mapping, mapping_path=mapping_path)
 
     if source_type == "generic":
         if input_format != "jsonl":
@@ -43,8 +63,16 @@ def load_normalized_events(
                 f"Unsupported input_format {input_format!r} for source_type='generic'. "
                 "Expected: jsonl."
             )
-        events, errors = load_generic_jsonl(path, mapping=mapping)
-        return events, errors
+
+        try:
+            if mapping_path is not None:
+                events = parse_jsonl_with_mapping(path, mapping_path=mapping_path)
+                return events, []
+
+            events, errors = load_generic_jsonl(path, mapping=resolved_mapping)
+            return events, errors
+        except (ValueError, OSError) as exc:
+            raise NormalizedLoadError(f"Failed to load generic JSONL: {exc}") from exc
 
     if source_type == "ssh":
         events = load_ssh_normalized_events(path)
