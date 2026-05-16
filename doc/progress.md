@@ -1972,3 +1972,106 @@ Confirmed the project now has the foundation for bring-your-own structured logs,
 
 Project status
 You’re past the “core architecture is unclear” stage and into the “finish integration and polish” stage. The remaining work is real, but it’s mostly bounded implementation and documentation rather than deep redesign.
+
+Progress log: 05/15/2026
+1. Generic JSONL + mapping pipeline
+
+Implemented a generic JSONL loader that:
+
+Reads one JSON object per line.
+
+Optionally applies a mapping config to map source fields like client_ip, username, etc. into normalized keys before calling NormalizedEvent.from_mapping(...).
+
+Verified that normalize, generic-incidents, generic-explain, normalized-incidents, and normalized-explain all work on data/sample_generic.jsonl, with and without the mapping file.
+
+2. Mapping behavior
+
+Confirmed that the mapping config is actually used to populate normalized fields (e.g., timestamp, message, severity, src_ip, user, host, service, status_code, session_hint).
+
+Fixed the “string-to-string pairs” mismatch by aligning the mapping loader / file shape so it no longer throws or blocks the flows you care about.
+
+Ensured the mapping file is wired through the generic normalization paths and incident/explain flows (both generic and normalized).
+
+3. Generic syslog support
+
+Implemented an RFC3164-style syslog parser that:
+
+Parses PRI, timestamp, hostname, and message using a regex.
+
+Derives facility and severity from PRI.
+
+Normalizes timestamps by inferring the current year and using UTC.
+
+Builds a record compatible with NormalizedEvent.from_mapping(...) (timestamp, host, message, severity, category=syslog, plus pri and facility in extra).
+
+Added load_generic_syslog(...) and updated the normalized loader so:
+
+source_type=generic + --input-format syslog now works.
+
+The same grouping and explain logic can operate over normalized syslog events.
+
+4. End-to-end CLI verification
+
+Ran a comprehensive set of CLI commands:
+
+normalize on:
+
+sample_generic.jsonl
+
+sample_generic.jsonl with mapping
+
+sample_syslog.log with --input-format syslog
+
+generic-incidents on:
+
+sample_generic.jsonl (with/without mapping)
+
+sample_syslog.log
+
+generic-explain on:
+
+sample_generic.jsonl (first incident, with/without mapping, with/without AI)
+
+sample_syslog.log (first incident)
+
+normalized-incidents and normalized-explain on:
+
+generic JSONL
+
+generic syslog
+
+SSH log
+
+Apache log
+
+Confirmed that:
+
+Generic JSONL events are normalized correctly (auth/app/web with reasonable severities and fields).
+
+Syslog events are normalized (with syslog severity labels, host grouping, and category).
+
+Generic + normalized incident groupings and explains run without crashes across all three source types.
+
+5. Documentation and samples
+
+Added data/sample_syslog.log with a mix of:
+
+SSH auth failures and success.
+
+App failure with status code and trace id.
+
+Gateway rate-limit event with client IP and status code.
+
+Kernel warning line.
+
+Added docs/architecture.md documenting:
+
+The overall pipeline: parsers → adapters/loader → NormalizedEvent → incident grouping → evidence → AI explain.
+
+How generic and source-specific paths fit into the same normalized flows.
+
+Adjusted docs/usage to:
+
+Show how to use --input-format syslog for generic logs.
+
+Keep JSONL+mapping as the primary BYO-logs path.

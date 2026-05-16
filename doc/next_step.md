@@ -1,55 +1,124 @@
-Core ingestion
-Add field-mapping config format for custom logs.
+Core ingestion & normalization
+Design simple field-mapping config format (YAML) for custom fields → normalized schema.
 
-Add config-driven generic JSONL parser using NormalizedEvent.from_mapping(...).
+Implement config-driven generic JSONL parser:
 
-Add one more input format, ideally RFC 3164 syslog with basic PRI, timestamp, hostname, severity, and message parsing. RFC 3164 defines the PRI and header structure clearly enough for a simple first parser.
+Loads mapping file.
 
-Add tests for syslog parsing and normalization edge cases.
+Applies mapping and feeds NormalizedEvent.from_mapping(...).
 
-CLI integration
-Wire --mapping path/to/mapping.yaml into the real normalize command.
+Add support for additional input format:
 
-Add --mapping support to normalized-incidents.
+RFC3164-style syslog text parser (generic_syslog).
 
-Add --mapping to normalized-explain if that flow already accepts generic normalized input.
+Wire --input-format syslog for source_type=generic in the normalized loader.
 
-Add end-to-end CLI tests for mapped JSONL and, after it exists, syslog.
+CLI affordances
+normalize supports:
 
-Incident flows
-Verify generic logs can move cleanly from parse → normalize → group into incidents.
+JSONL (default).
 
-Verify generic-incidents and normalized-incidents work across SSH, Apache, and generic JSONL.
+--mapping path/to/mapping.yaml.
 
-Verify evidence generation and AI explain still behave consistently across source types.
+--input-format syslog for generic source.
 
-Documentation
-Add a README section: Bring your own logs.
+generic-incidents supports:
 
-Document JSONL normalization with and without mapping files.
+JSONL and syslog inputs.
 
-Document normalize-ssh and normalize-apache.
+Optional --mapping for JSONL.
 
-Document generic-incidents, normalized-incidents, generic-explain, and normalized-explain.
+generic-explain supports:
 
-Document AI setup options, including mock mode and Ollama.
+JSONL and syslog.
 
-Samples and polish
-Add 1–2 sample generic logs, including one that benefits from a mapping file.
+--mapping for JSONL.
 
-Add a short architecture overview covering parsers → adapters → NormalizedEvent → incidents → evidence → AI explain.
+Optional --use-ai.
 
-Do a final full test run and fix any broken assumptions exposed by the new generic pipeline.
+normalized-incidents supports:
 
-Suggested next order
-Wire --mapping into the actual CLI entrypoint.
+--source-type generic|ssh|apache.
 
-Add RFC 3164 syslog parser.
+--input-format jsonl|syslog for generic.
 
-Add CLI/integration tests for both.
+Optional --mapping for generic JSONL.
 
-Update README and add sample files.
+normalized-explain supports:
 
-Do final polish on incident and AI flows.
+Same source types and formats as normalized-incidents.
 
-That order keeps the project moving through the real user path instead of just building isolated helpers. RFC 3164 is the best next parser because its traditional header structure is standardized enough to keep the scope small.
+Optional --mapping and --use-ai.
+
+Documentation & samples
+“Bring your own logs” doc section:
+
+How to run normalize on JSONL (with/without mapping).
+
+How to run normalize on syslog with --input-format syslog.
+
+SSH / Apache flows:
+
+How to run normalize-ssh and normalize-apache or their equivalents.
+
+How to run generic-incidents / normalized-incidents for SSH and Apache.
+
+AI enablement docs:
+
+How to enable mock vs Ollama.
+
+How to run generic-explain / normalized-explain with --use-ai.
+
+Sample logs:
+
+data/sample_generic.jsonl (mixed auth/app/web).
+
+data/sample_syslog.log (auth/app/gateway/kernel syslog).
+
+Example mapping file mapping/example_auth_app.yaml.
+
+Architecture overview:
+
+docs/architecture.md with:
+
+Parsers → adapters → NormalizedEvent.
+
+Grouping into incidents.
+
+Incident evidence → AI explain (generic, SSH, Apache, normalized).
+
+Quality & polish
+End-to-end smoke tests for:
+
+normalize (JSONL, JSONL+mapping, syslog).
+
+generic-incidents (JSONL, JSONL+mapping, syslog).
+
+generic-explain (JSONL, JSONL+mapping+AI, syslog).
+
+normalized-incidents (generic JSONL, generic syslog, SSH, Apache).
+
+normalized-explain (generic JSONL, generic syslog, SSH, Apache).
+
+Mapping loader and parser behavior aligned well enough for this cut (no fatal errors with the current mapping file).
+
+Commit history:
+
+One commit for generic syslog support + mapping/loader changes.
+
+One commit for architecture doc + syslog sample log.
+
+Deferred to tomorrow / future iterations
+Generic HTTP ingestion endpoint / tiny web UI for JSONL/syslog.
+
+SQLite incident store (schema + writes).
+
+Triage loop CLI / UI:
+
+Mark incidents as true_incident, benign, needs_review.
+
+Richer syslog message parsing:
+
+Extract IP, user, status, and session hints from message body where obvious.
+
+Tests specifically for syslog parsing edge cases (missing PRI, weird timestamps, etc.).
