@@ -1,6 +1,6 @@
 # Aegislog Training Cheatsheet
 
-This cheatsheet explains how to train anomaly detection models for Aegislog and how those models connect to the `analyze`, `incidents`, `report`, Apache CLI commands, and AI-style explain for SSH and Apache. It also clarifies how trained models interact with the AI backend (mock vs Ollama).
+This cheatsheet explains how to train anomaly detection models for Aegislog and how those models connect to the `analyze`, `incidents`, `report`, Apache CLI commands, and AI-style explain for SSH and Apache. It also clarifies how trained models interact with the AI backend (mock vs Ollama), and how they relate to the newer generic / normalized flows.
 
 ---
 
@@ -33,6 +33,8 @@ The saved model can then be used by:
 - `analyze`, `incidents`, and `report` via their `--model-path` / `--model-type` options (SSH + Apache).
 - The Apache-specific CLI (`python -m aegislog.cli_apache`) via its `--model-path` / `--model-type` options.
 - The SSH and Apache AI explain flows, which build their evidence on top of model-scored sessions before calling the AI backend (mock or Ollama).
+
+The **generic / normalized** flows (`normalize`, `generic-incidents`, `generic-explain`, `normalized-incidents`, `normalized-explain`) currently *do not* use any trained model; they are driven by normalization + rule-based grouping instead.
 
 ---
 
@@ -202,7 +204,7 @@ This uses the same model to summarize sessions and incidents (counts, severity, 
 
 ## 5. How training relates to `model-type` and defaults
 
-The CLI supports a `--model-type` flag on `analyze`, `incidents`, `explain`, `report`, and Apache CLI:
+The CLI supports a `--model-type` flag on `analyze`, `incidents`, `explain`, `report`, and the Apache CLI:
 
 ```bash
 --model-type {iforest, ocsvm, lof}
@@ -213,14 +215,16 @@ Internally, helpers like `resolve_model_path` pick default model paths based on:
 - `log_type` (e.g. `ssh_auth` vs `apache_error`)
 - `model_type` (e.g. `iforest`, `ocsvm`, `lof`)
 
-Common defaults (may vary slightly with code):
+Common defaults (exact paths may vary slightly):
 
-- `iforest` + `ssh_auth`       → `models/log_anomaly_iforest_ssh.joblib`
-- `iforest` + `apache_error`   → `models/log_anomaly_iforest_apache.joblib`
+- `iforest` + `ssh_auth`        → `models/log_anomaly_iforest_ssh.joblib`
+- `iforest` + `apache_error`    → `models/log_anomaly_iforest_apache.joblib`
 
 This lets you maintain separate models for SSH and Apache while using the same CLI commands.
 
 If you explicitly pass `--model-path`, that path takes precedence over any defaults.
+
+The **generic** and **normalized** commands do not look at `--model-type` or any trained models; they operate on normalized events and rule-based grouping only.
 
 ---
 
@@ -288,7 +292,7 @@ Apache CLI will:
 
 ## 7. SSH AI explain, trained models, and the AI backend
 
-The AI-style SSH explain flow (`python -m aegislog.cli explain ... --use-llm`) builds on top of the **same trained SSH models** used for `analyze` / `incidents` / `report`, and then calls the configured AI backend:
+The AI-style SSH explain flow (`aegislog explain ... --use-llm`) builds on top of the **same trained SSH models** used for `analyze` / `incidents` / `report`, and then calls the configured AI backend:
 
 1. The SSH anomaly model scores sessions in the log.
 2. Sessions are grouped into incidents (by IP and auth patterns).
@@ -375,18 +379,21 @@ If the AI backend fails, the Apache CLI prints a clear `AI analysis failed: ...`
 
 ---
 
-## 10. Generic logs and training
+## 10. Generic / normalized logs and training
 
-The **generic log path** (normalized JSONL + `generic-incidents` + `generic-explain`) currently:
+The **generic log path** (normalized JSONL/syslog + `generic-incidents` + `generic-explain`) and the **normalized** entrypoints (`normalized-incidents`, `normalized-explain`) currently:
 
-- does **not** require or use any trained anomaly model,
-- relies on simple, source-agnostic heuristics:
+- do **not** require or use any trained anomaly model,
+- rely on parsing + normalization into `NormalizedEvent`,
+- use simple, source-agnostic heuristics and grouping:
   - counts of events, errors, warnings,
   - distinct users/hosts/source IPs,
-  - time windows and grouping keys,
+  - time windows and group keys,
   - coarse patterns like `error_spike`, `warning_burst`, `auth_fail_burst`.
 
-`generic-explain` builds `IncidentEvidence` from these heuristics and then calls the same AI backend used by SSH and Apache, but there is no `train` step for generic logs yet. Training-based generic anomaly models could be added later, but are out of scope for the current checklist.
+`generic-explain` and `normalized-explain --source-type generic` build `IncidentEvidence` from these normalized signals and then call the same AI backend used by SSH and Apache, but there is no `train` step for generic logs yet.
+
+Training-based generic anomaly models could be added later; for now, training is only for **session-based SSH and Apache** pipelines.
 
 ---
 
@@ -402,7 +409,7 @@ For both SSH and Apache workflows:
 - Use **AI explain**:
   - SSH: `--use-llm` with `aegislog explain`
   - Apache: `--ai-explain` with `python -m aegislog.cli_apache`
-  - Generic: `--use-ai` with `python -m aegislog.cli generic-explain`
+  - Generic: `--use-ai` with `python -m aegislog.cli generic-explain` or `normalized-explain --use-ai --source-type generic`
   when you want:
   - structured, AI-generated narrative analysis,
   - hypotheses and recommended next steps derived from the evidence,
