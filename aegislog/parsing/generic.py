@@ -1,10 +1,53 @@
 from __future__ import annotations
 
 import json
+import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from aegislog.normalized import NormalizedEvent
+
+
+_SYSLOG_RE = re.compile(
+    r"""
+    ^
+    (?:<(?P<pri>\d{1,3})>)?
+    (?P<timestamp>[A-Z][a-z]{2}\s{1,2}\d{1,2}\s\d{2}:\d{2}:\d{2})
+    \s+
+    (?P<hostname>\S+)
+    \s+
+    (?P<message>.*?)
+    \s*$
+    """,
+    re.VERBOSE,
+)
+
+_MONTHS = {
+    "Jan": 1,
+    "Feb": 2,
+    "Mar": 3,
+    "Apr": 4,
+    "May": 5,
+    "Jun": 6,
+    "Jul": 7,
+    "Aug": 8,
+    "Sep": 9,
+    "Oct": 10,
+    "Nov": 11,
+    "Dec": 12,
+}
+
+_SYSLOG_SEVERITY = {
+    0: "emergency",
+    1: "alert",
+    2: "critical",
+    3: "error",
+    4: "warn",
+    5: "notice",
+    6: "info",
+    7: "debug",
+}
 
 
 def _coerce_mapping_field_names(value: Any) -> List[str]:
@@ -66,6 +109,68 @@ def _extract_mapped_record(
     return mapped
 
 
+def _parse_syslog_timestamp(value: str) -> str:
+    """
+    RFC 3164 timestamps do not include a year or timezone.
+    Assume current year and UTC for normalization.
+    """
+    text = value.strip()
+    parts = text.split()
+    if len(parts) != 3:
+        return text
+
+    month_text, day_text, time_text = parts
+    month = _MONTHS.get(month_text)
+    if month is None:
+        return text
+
+    try:
+        day = int(day_text)
+        hh, mm, ss = [int(x) for x in time_text.split(":", 2)]
+        now = datetime.now(timezone.utc)
+        dt = datetime(now.year, month, day, hh, mm, ss, tzinfo=timezone.utc)
+        return dt.isoformat()
+    except (TypeError, ValueError):
+        return text
+
+
+def _parse_syslog_line(line: str) -> Dict[str, Any]:
+    match = _SYSLOG_RE.match(line)
+    if not match:
+        raise ValueError("line does not match RFC3164-style syslog format")
+
+    pri_raw = match.group("pri")
+    timestamp_raw = match.group("timestamp")
+    hostname = match.group("hostname")
+    message = match.group("message").strip()
+
+    pri: Optional[int] = None
+    severity: Optional[str] = None
+    facility: Optional[int] = None
+
+    if pri_raw is not None:
+        pri = int(pri_raw)
+        facility = pri // 8
+        severity_code = pri % 8
+        severity = _SYSLOG_SEVERITY.get(severity_code, "unknown")
+
+    record: Dict[str, Any] = {
+        "timestamp": _parse_syslog_timestamp(timestamp_raw),
+        "host": hostname,
+        "message": message,
+        "raw_message": line,
+        "severity": severity,
+        "event_category": "syslog",
+    }
+
+    if pri is not None:
+        record["pri"] = pri
+    if facility is not None:
+        record["facility"] = facility
+
+    return record
+
+
 def load_generic_jsonl(
     path: str,
     mapping: Optional[Dict[str, Any]] = None,
@@ -107,6 +212,40 @@ def load_generic_jsonl(
                 events.append(event)
             except Exception as e:
                 errors.append(f"line {line_no}: failed to normalize record ({e})")
+
+    return events, errors
+
+
+def load_generic_syslog(
+    path: str,
+    mapping: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[NormalizedEvent], List[str]]:
+    """
+    Load RFC3164-style syslog lines and normalize them into NormalizedEvent objects.
+
+    Returns (events, errors).
+    """
+    events: List[NormalizedEvent] = []
+    errors: List[str] = []
+
+    p = Path(path)
+    with p.open("r", encoding="utf-8") as f:
+        for line_no, raw_line in enumerate(f, start=1):
+            line = raw_line.rstrip("\n")
+            if not line.strip():
+                continue
+
+            try:
+                data = _parse_syslog_line(line)
+                mapped = _extract_mapped_record(data, mapping)
+                source_type = mapped.pop("_mapped_source_type", None) or "generic_syslog"
+                event = NormalizedEvent.from_mapping(
+                    mapped,
+                    source_type=source_type,
+                )
+                events.append(event)
+            except Exception as e:
+                errors.append(f"line {line_no}: failed to parse syslog line ({e})")
 
     return events, errors
 

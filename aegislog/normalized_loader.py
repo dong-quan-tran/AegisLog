@@ -7,8 +7,7 @@ from aegislog.normalized import NormalizedEvent
 from aegislog.adapters.ssh import load_ssh_normalized_events
 from aegislog.adapters.apache import load_apache_normalized_events
 from aegislog.mappings import load_mapping_file
-from aegislog.parsing.generic import load_generic_jsonl
-from aegislog.parsing.jsonl_generic import parse_jsonl_with_mapping
+from aegislog.parsing.generic import load_generic_jsonl, load_generic_syslog
 
 
 class NormalizedLoadError(Exception):
@@ -55,24 +54,27 @@ def load_normalized_events(
     _ensure_file_exists(path)
 
     source_type = source_type.lower()
+    input_format = input_format.lower()
     resolved_mapping = _resolve_mapping(mapping=mapping, mapping_path=mapping_path)
 
     if source_type == "generic":
-        if input_format != "jsonl":
+        try:
+            if input_format == "jsonl":
+                events, errors = load_generic_jsonl(path, mapping=resolved_mapping)
+                return events, errors
+
+            if input_format == "syslog":
+                events, errors = load_generic_syslog(path, mapping=resolved_mapping)
+                return events, errors
+
             raise NormalizedLoadError(
                 f"Unsupported input_format {input_format!r} for source_type='generic'. "
-                "Expected: jsonl."
+                "Expected one of: jsonl, syslog."
             )
-
-        try:
-            if mapping_path is not None:
-                events = parse_jsonl_with_mapping(path, mapping_path=mapping_path)
-                return events, []
-
-            events, errors = load_generic_jsonl(path, mapping=resolved_mapping)
-            return events, errors
         except (ValueError, OSError) as exc:
-            raise NormalizedLoadError(f"Failed to load generic JSONL: {exc}") from exc
+            raise NormalizedLoadError(
+                f"Failed to load generic {input_format}: {exc}"
+            ) from exc
 
     if source_type == "ssh":
         events = load_ssh_normalized_events(path)
