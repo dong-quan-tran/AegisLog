@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import Any, Dict
+from typing import Any, Callable, Dict, TypeVar
 
 from aegislog.ai.client import LLMError, generate_incident_analysis
 from aegislog.ai.prompts_structured import build_structured_incident_analysis_prompt
@@ -14,8 +14,10 @@ from aegislog.incidents_generic import (
     group_generic_events_to_incidents,
 )
 from aegislog.incidents_normalized import build_normalized_incident_evidence
-from aegislog.normalized_loader import NormalizedLoadError, load_normalized_events
+from aegislog.normalized_loader import load_normalized_events
 from aegislog.parsing.generic import summarize_normalized_events
+
+T = TypeVar("T")
 
 
 def _write_temp_content(content: str) -> str:
@@ -32,6 +34,36 @@ def _write_temp_content(content: str) -> str:
     return path
 
 
+def _with_temp_content(content: str, fn: Callable[[str], T]) -> T:
+    path = _write_temp_content(content)
+    try:
+        return fn(path)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def _summarize_events(source_type: str, events: list) -> Dict[str, Any]:
+    if source_type == "ssh":
+        return summarize_ssh_normalized_events(events)
+    if source_type == "apache":
+        return summarize_apache_normalized_events(events)
+    return summarize_normalized_events(events)
+
+
+def _maybe_ai_analysis(evidence: Any, use_ai: bool) -> Dict[str, Any]:
+    if not use_ai:
+        return {}
+
+    try:
+        prompt = build_structured_incident_analysis_prompt(evidence)
+        return {"ai_analysis": generate_incident_analysis(prompt)}
+    except LLMError as exc:
+        return {"ai_error": str(exc)}
+
+
 def normalize_logs(
     *,
     content: str,
@@ -40,36 +72,27 @@ def normalize_logs(
     mapping: Dict[str, Any] | None,
     top: int,
 ) -> Dict[str, Any]:
-    path = _write_temp_content(content)
-    try:
+    def _run(path: str) -> Dict[str, Any]:
         events, errors = load_normalized_events(
             source_type=source_type,
             path=path,
             input_format=input_format,
-            mapping=mapping,
+            mapping=mapping if source_type == "generic" else None,
         )
 
         preview = [event.to_dict() for event in events[:top]]
-
-        if source_type == "ssh":
-            summary = summarize_ssh_normalized_events(events)
-        elif source_type == "apache":
-            summary = summarize_apache_normalized_events(events)
-        else:
-            summary = summarize_normalized_events(events)
+        summary = _summarize_events(source_type, events)
 
         return {
             "source_type": source_type,
             "input_format": input_format,
+            "mapping": mapping if source_type == "generic" else None,
             "summary": summary,
             "preview": preview,
             "parse_errors": errors,
         }
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+
+    return _with_temp_content(content, _run)
 
 
 def generic_incidents(
@@ -80,8 +103,7 @@ def generic_incidents(
     window_minutes: int,
     top: int,
 ) -> Dict[str, Any]:
-    path = _write_temp_content(content)
-    try:
+    def _run(path: str) -> Dict[str, Any]:
         events, errors = load_normalized_events(
             source_type="generic",
             path=path,
@@ -97,17 +119,51 @@ def generic_incidents(
         return {
             "source_type": "generic",
             "input_format": input_format,
+            "mapping": mapping,
             "window_minutes": window_minutes,
             "total_events": len(events),
             "total_incidents": len(incidents),
             "incidents": [incident.to_dict() for incident in incidents[:top]],
             "parse_errors": errors,
         }
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+
+    return _with_temp_content(content, _run)
+
+
+def normalized_incidents(
+    *,
+    content: str,
+    source_type: str,
+    input_format: str,
+    mapping: Dict[str, Any] | None,
+    window_minutes: int,
+    top: int,
+) -> Dict[str, Any]:
+    def _run(path: str) -> Dict[str, Any]:
+        events, errors = load_normalized_events(
+            source_type=source_type,
+            path=path,
+            input_format=input_format,
+            mapping=mapping if source_type == "generic" else None,
+        )
+
+        incidents = group_generic_events_to_incidents(
+            events,
+            window_minutes=window_minutes,
+        )
+
+        return {
+            "source_type": source_type,
+            "input_format": input_format,
+            "mapping": mapping if source_type == "generic" else None,
+            "window_minutes": window_minutes,
+            "total_events": len(events),
+            "total_incidents": len(incidents),
+            "incidents": [incident.to_dict() for incident in incidents[:top]],
+            "parse_errors": errors,
+        }
+
+    return _with_temp_content(content, _run)
 
 
 def generic_explain(
@@ -120,8 +176,7 @@ def generic_explain(
     first: bool,
     use_ai: bool,
 ) -> Dict[str, Any]:
-    path = _write_temp_content(content)
-    try:
+    def _run(path: str) -> Dict[str, Any]:
         events, errors = load_normalized_events(
             source_type="generic",
             path=path,
@@ -138,6 +193,7 @@ def generic_explain(
             return {
                 "source_type": "generic",
                 "input_format": input_format,
+                "mapping": mapping,
                 "window_minutes": window_minutes,
                 "total_events": len(events),
                 "total_incidents": 0,
@@ -163,26 +219,17 @@ def generic_explain(
         payload = {
             "source_type": "generic",
             "input_format": input_format,
+            "mapping": mapping,
             "window_minutes": window_minutes,
             "selected_index": selected_index,
             "incident": incident.to_dict(),
             "incident_evidence": evidence.to_dict(),
             "parse_errors": errors,
         }
-
-        if use_ai:
-            try:
-                prompt = build_structured_incident_analysis_prompt(evidence)
-                payload["ai_analysis"] = generate_incident_analysis(prompt)
-            except LLMError as exc:
-                payload["ai_error"] = str(exc)
-
+        payload.update(_maybe_ai_analysis(evidence, use_ai))
         return payload
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+
+    return _with_temp_content(content, _run)
 
 
 def normalized_explain(
@@ -196,8 +243,7 @@ def normalized_explain(
     first: bool,
     use_ai: bool,
 ) -> Dict[str, Any]:
-    path = _write_temp_content(content)
-    try:
+    def _run(path: str) -> Dict[str, Any]:
         events, errors = load_normalized_events(
             source_type=source_type,
             path=path,
@@ -214,6 +260,7 @@ def normalized_explain(
             return {
                 "source_type": source_type,
                 "input_format": input_format,
+                "mapping": mapping if source_type == "generic" else None,
                 "window_minutes": window_minutes,
                 "total_events": len(events),
                 "total_incidents": 0,
@@ -240,23 +287,14 @@ def normalized_explain(
         payload = {
             "source_type": source_type,
             "input_format": input_format,
+            "mapping": mapping if source_type == "generic" else None,
             "window_minutes": window_minutes,
             "selected_index": selected_index,
             "incident": incident.to_dict(),
             "incident_evidence": evidence.to_dict(),
             "parse_errors": errors,
         }
-
-        if use_ai:
-            try:
-                prompt = build_structured_incident_analysis_prompt(evidence)
-                payload["ai_analysis"] = generate_incident_analysis(prompt)
-            except LLMError as exc:
-                payload["ai_error"] = str(exc)
-
+        payload.update(_maybe_ai_analysis(evidence, use_ai))
         return payload
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+
+    return _with_temp_content(content, _run)

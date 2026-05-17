@@ -23,6 +23,22 @@ _SYSLOG_RE = re.compile(
     re.VERBOSE,
 )
 
+_SYSLOG_TAG_RE = re.compile(
+    r"""
+    ^
+    (?P<tag>[A-Za-z0-9_.\-/]+)
+    (?:\[(?P<pid>\d+)\])?
+    (?:
+        :\s*
+        |
+        \s+
+    )?
+    (?P<content>.*)
+    $
+    """,
+    re.VERBOSE,
+)
+
 _MONTHS = {
     "Jan": 1,
     "Feb": 2,
@@ -81,8 +97,10 @@ def _extract_mapped_record(
       "source_type": "generic_jsonl",
       "fields": {
         "timestamp": ["@timestamp", "time", "ts"],
-        "message": ["msg", "message"],
-        ...
+        "message": ["msg", "message"]
+      },
+      "defaults": {
+        "event_category": "auth"
       }
     }
     """
@@ -94,6 +112,11 @@ def _extract_mapped_record(
         return dict(record)
 
     mapped: Dict[str, Any] = dict(record)
+
+    defaults = mapping.get("defaults", {})
+    if isinstance(defaults, dict):
+        for key, value in defaults.items():
+            mapped.setdefault(key, value)
 
     for normalized_field, candidate_names in fields.items():
         aliases = _coerce_mapping_field_names(candidate_names)
@@ -134,6 +157,27 @@ def _parse_syslog_timestamp(value: str) -> str:
         return text
 
 
+def _extract_syslog_tag_parts(message: str) -> Dict[str, Any]:
+    msg = message.strip()
+    match = _SYSLOG_TAG_RE.match(msg)
+    if not match:
+        return {"message": msg}
+
+    tag = match.group("tag")
+    pid = match.group("pid")
+    content = (match.group("content") or "").strip()
+
+    result: Dict[str, Any] = {
+        "message": content or msg,
+        "service": tag,
+    }
+
+    if pid is not None:
+        result["pid"] = pid
+
+    return result
+
+
 def _parse_syslog_line(line: str) -> Dict[str, Any]:
     match = _SYSLOG_RE.match(line)
     if not match:
@@ -154,13 +198,15 @@ def _parse_syslog_line(line: str) -> Dict[str, Any]:
         severity_code = pri % 8
         severity = _SYSLOG_SEVERITY.get(severity_code, "unknown")
 
+    tag_parts = _extract_syslog_tag_parts(message)
+
     record: Dict[str, Any] = {
         "timestamp": _parse_syslog_timestamp(timestamp_raw),
         "host": hostname,
-        "message": message,
         "raw_message": line,
         "severity": severity,
         "event_category": "syslog",
+        **tag_parts,
     }
 
     if pri is not None:
