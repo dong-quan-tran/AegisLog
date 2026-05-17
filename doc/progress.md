@@ -2075,3 +2075,158 @@ Adjusted docs/usage to:
 Show how to use --input-format syslog for generic logs.
 
 Keep JSONL+mapping as the primary BYO-logs path.
+
+Progress log: 05/16/2026
+
+Backend architecture and API
+Aligned the CLI, service layer, and FastAPI API around a consistent set of flows:
+
+Generic normalization (JSONL + syslog).
+
+Normalized incidents (generic, ssh, apache).
+
+Generic explain and normalized explain (with optional AI).
+
+Added /normalized-incidents to the HTTP API and wired it to the service layer.
+
+Tightened CORS and ensured the API surface is compatible with a React frontend running on localhost.
+
+Data model and parsing
+Confirmed NormalizedEvent is the canonical shape and left it unchanged, validating that it:
+
+Normalizes canonical fields (timestamp, severity, user, src_ip, dst_ip, etc.).
+
+Preserves unmapped source fields in extra.
+
+Upgraded generic parsing:
+
+parsing/generic.py now supports richer mapping semantics and better syslog enrichment (service, pid, etc.).
+
+parsing/jsonl_generic.py now:
+
+Accepts an optional mapping path (including None for “no mapping”).
+
+Uses a compatibility layer so both old flat mappings and new structured mappings work.
+
+Mapping system
+Evolved the mapping schema to a structured form:
+
+{"fields": {normalized_field: [alias1, alias2, ...]}, "defaults": {...}, "source_type": ...}.
+
+Implemented normalization logic that:
+
+Tolerates shorthand inputs (single string or list for field aliases).
+
+Produces a canonical internal representation (lists of aliases).
+
+Added a compatibility helper to:
+
+Flatten mappings back to a simple normalized_field -> source_field dict for legacy paths.
+
+Updated tests to assert the new canonical representation rather than the old flat shape.
+
+CLI improvements
+Cleaned up cli.py so that:
+
+Commands return explicit exit codes.
+
+JSON output paths consistently use a small helper (_write_json_payload pattern).
+
+Generic and normalized flows are clearly distinguished in help/epilog text.
+
+Ensured CLI commands cover:
+
+normalize, normalize-ssh, normalize-apache.
+
+generic-incidents, normalized-incidents.
+
+generic-explain, normalized-explain.
+
+Existing SSH-specific flows remain intact.
+
+Service layer (services_api.py)
+Refactored to a clearer service boundary:
+
+Introduced a temp-file helper wrapper to de-duplicate content→file→cleanup logic.
+
+Centralized event summarization by source_type.
+
+Added a small helper to encapsulate “optional AI analysis” logic.
+
+Ensured all services:
+
+Echo back source_type, input_format, and (where relevant) mapping and window_minutes.
+
+Provide consistent shapes for summary, incidents, incident, and incident_evidence.
+
+API request models
+Tightened api_models.py:
+
+Forbids unknown request fields.
+
+Validates that content isn’t empty/whitespace.
+
+Enforces that mapping is only allowed when source_type="generic".
+
+Keeps ExplainRequest as a clean extension of LogRequest with index, first, and use_ai.
+
+Samples, examples, and tests
+Updated sample data:
+
+data/sample_generic.jsonl now reflects realistic auth events with normalized fields.
+
+data/sample_syslog.log contains plausible sshd-style syslog lines.
+
+mapping/example_auth_app.yaml demonstrates the new structured mapping (fields + defaults + source_type).
+
+Added/updated tests:
+
+tests/test_api_smoke.py:
+
+Health check.
+
+Normalize generic JSONL.
+
+Generic incidents and normalized incidents.
+
+Generic and normalized explain (first incident).
+
+Validation that mapping is rejected for non-generic sources.
+
+tests/test_mappings.py:
+
+Asserts that JSON and YAML mapping files load into the new {"fields": {...}} structure with list aliases.
+
+tests/test_jsonl_generic_parser.py:
+
+Validates parsing with mapping and without mapping (including None mapping path).
+
+Regressions fixed
+Resolved mapping-related test failures by:
+
+Making mapping loading backward compatible.
+
+Updating tests to assert the canonical structured shape.
+
+Adjusting JSONL parsing to handle a None mapping path.
+
+After those fixes, the entire pytest suite is now green (104/104).
+
+Overall status at end of day
+Backend logic is implemented, refactored, and fully test-covered for:
+
+Normalization.
+
+Incident grouping.
+
+Explain flows (generic + normalized, with optional AI).
+
+CLI and HTTP API parity.
+
+You now have:
+
+A stable normalized schema.
+
+A stable mapping contract.
+
+Stable endpoints ready for a frontend.
