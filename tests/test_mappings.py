@@ -9,9 +9,9 @@ def test_load_mapping_file_json(tmp_path):
         json.dumps(
             {
                 "fields": {
-                    "timestamp": "ts",
-                    "src_ip": "client_ip",
-                    "message": "log_message",
+                    "timestamp": ["ts"],
+                    "src_ip": ["client_ip"],
+                    "message": ["log_message"],
                 }
             }
         ),
@@ -21,9 +21,11 @@ def test_load_mapping_file_json(tmp_path):
     mapping = load_mapping_file(str(path))
 
     assert mapping == {
-        "timestamp": "ts",
-        "src_ip": "client_ip",
-        "message": "log_message",
+        "fields": {
+            "timestamp": ["ts"],
+            "src_ip": ["client_ip"],
+            "message": ["log_message"],
+        }
     }
 
 
@@ -43,8 +45,10 @@ fields:
     mapping = load_mapping_file(str(path))
 
     assert mapping == {
-        "timestamp": "ts",
-        "src_ip": "client_ip",
-        "user": "user_name",
-        "message": "log_message",
+        "fields": {
+            "timestamp": ["ts"],
+            "src_ip": ["client_ip"],
+            "user": ["user_name"],
+            "message": ["log_message"],
+        }
     }
