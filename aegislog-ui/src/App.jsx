@@ -1,478 +1,426 @@
-import { useMemo, useState } from "react";
-import "./App.css";
+import { useState } from 'react'
+import {
+  apiNormalize,
+  apiNormalizedIncidents,
+  apiNormalizedExplain,
+} from './api'
 
-const API_BASE = "http://127.0.0.1:8000";
+const SAMPLE_LOG = `{"timestamp":"2026-05-16T10:00:00Z","message":"login failed","severity":"warn","user":"alice","src_ip":"10.0.0.1","event_category":"auth","event_action":"login_failed","service":"auth-api"}
+{"timestamp":"2026-05-16T10:03:00Z","message":"login failed","severity":"warn","user":"alice","src_ip":"10.0.0.1","event_category":"auth","event_action":"login_failed","service":"auth-api"}
+{"timestamp":"2026-05-16T10:20:00Z","message":"login ok","severity":"info","user":"alice","src_ip":"10.0.0.1","event_category":"auth","event_action":"login_success","service":"auth-api"}
+`
 
-const sampleLogs = `{"timestamp":"2026-05-11T21:00:00Z","level":"info","message":"User login succeeded","event_type":"auth","action":"login_success","username":"alice","client_ip":"192.168.1.10","hostname":"web-01","app":"auth-service","request_id":"req-1001"}
-{"timestamp":"2026-05-11T21:01:05Z","level":"warn","message":"Repeated login failure","event_type":"auth","action":"login_failed","username":"bob","client_ip":"203.0.113.55","hostname":"web-01","app":"auth-service","request_id":"req-1002"}
-{"timestamp":"2026-05-11T21:02:10Z","level":"error","message":"Upstream timeout","event_type":"app","action":"request_error","hostname":"api-01","app":"payments","status_code":504,"trace_id":"trace-7788"}
-{"timestamp":"2026-05-11T21:03:15Z","level":"error","message":"Too many requests","event_type":"web","action":"rate_limit","client_ip":"198.51.100.22","hostname":"edge-01","app":"gateway","status_code":429}`;
-
-const severityRank = {
-  critical: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-  info: 0,
-  unknown: -1,
-};
-
-const priorityRank = {
-  critical: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-};
-
-function toneValue(value = "") {
-  return value.toLowerCase().trim();
-}
-
-function formatDate(value) {
-  if (!value) return "Unknown time";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
-}
-
-function SeverityPill({ value }) {
-  const tone = toneValue(value) || "default";
-  return <span className={`pill pill-${tone}`}>{value || "unknown"}</span>;
-}
-
-function StatCard({ label, value, hint }) {
-  return (
-    <div className="stat-card">
-      <span className="stat-label">{label}</span>
-      <strong>{value}</strong>
-      <span className="stat-hint">{hint}</span>
-    </div>
-  );
-}
+const SOURCE_TYPES = ['generic', 'ssh', 'apache']
+const INPUT_FORMATS = ['jsonl', 'syslog']
 
 function App() {
-  const [content, setContent] = useState(sampleLogs);
-  const [sourceType, setSourceType] = useState("generic");
-  const [inputFormat, setInputFormat] = useState("jsonl");
-  const [windowMinutes, setWindowMinutes] = useState(15);
+  const [content, setContent] = useState(SAMPLE_LOG)
+  const [sourceType, setSourceType] = useState('generic')
+  const [inputFormat, setInputFormat] = useState('jsonl')
+  const [windowMinutes, setWindowMinutes] = useState(15)
+  const [top, setTop] = useState(5)
+  const [useAi, setUseAi] = useState(false)
 
-  const [severityFilter, setSeverityFilter] = useState("all");
-  const [sortMode, setSortMode] = useState("priority_desc");
+  const [normalizeResult, setNormalizeResult] = useState(null)
+  const [incidentsResult, setIncidentsResult] = useState(null)
+  const [selectedIncidentIndex, setSelectedIncidentIndex] = useState(null)
+  const [explainResult, setExplainResult] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
 
-  const [loadingIncidents, setLoadingIncidents] = useState(false);
-  const [loadingExplain, setLoadingExplain] = useState(false);
-  const [error, setError] = useState("");
-  const [incidentsResponse, setIncidentsResponse] = useState(null);
-  const [selectedIncidentId, setSelectedIncidentId] = useState(null);
-  const [explainResponse, setExplainResponse] = useState(null);
+  const hasIncidents =
+    incidentsResult && Array.isArray(incidentsResult.incidents)
 
-  const incidents = incidentsResponse?.incidents || [];
+  async function handleNormalize() {
+    setLoading(true)
+    setError(null)
+    setExplainResult(null)
+    setIncidentsResult(null)
+    setSelectedIncidentIndex(null)
 
-  const filteredIncidents = useMemo(() => {
-    let items = [...incidents];
-
-    if (severityFilter !== "all") {
-      items = items.filter(
-        (incident) => toneValue(incident.priority) === severityFilter
-      );
+    try {
+      const payload = {
+        content,
+        source_type: sourceType,
+        input_format: inputFormat,
+        mapping: null,
+        window_minutes: windowMinutes,
+        top,
+      }
+      const data = await apiNormalize(payload)
+      setNormalizeResult(data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
     }
-
-    items.sort((a, b) => {
-      if (sortMode === "priority_desc") {
-        const p = (priorityRank[toneValue(b.priority)] || 0) - (priorityRank[toneValue(a.priority)] || 0);
-        if (p !== 0) return p;
-        return new Date(b.first_seen || 0) - new Date(a.first_seen || 0);
-      }
-
-      if (sortMode === "newest") {
-        return new Date(b.first_seen || 0) - new Date(a.first_seen || 0);
-      }
-
-      if (sortMode === "oldest") {
-        return new Date(a.first_seen || 0) - new Date(b.first_seen || 0);
-      }
-
-      if (sortMode === "events_desc") {
-        return (b.event_count || 0) - (a.event_count || 0);
-      }
-
-      return 0;
-    });
-
-    return items;
-  }, [incidents, severityFilter, sortMode]);
-
-  const selectedIncident = useMemo(() => {
-    if (!selectedIncidentId) return null;
-    return filteredIncidents.find((item) => item.incident_id === selectedIncidentId)
-      || incidents.find((item) => item.incident_id === selectedIncidentId)
-      || null;
-  }, [filteredIncidents, incidents, selectedIncidentId]);
-
-  const stats = useMemo(() => {
-    const priorityCounts = incidents.reduce(
-      (acc, incident) => {
-        const key = toneValue(incident.priority) || "unknown";
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-      },
-      { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 }
-    );
-
-    return {
-      totalEvents: incidentsResponse?.total_events ?? 0,
-      totalIncidents: incidentsResponse?.total_incidents ?? 0,
-      parseErrors: incidentsResponse?.parse_errors?.length ?? 0,
-      priorityCounts,
-    };
-  }, [incidents, incidentsResponse]);
+  }
 
   async function handleGroupIncidents() {
-    setLoadingIncidents(true);
-    setError("");
-    setExplainResponse(null);
-    setSelectedIncidentId(null);
+    setLoading(true)
+    setError(null)
+    setExplainResult(null)
+    setSelectedIncidentIndex(null)
 
     try {
-      const res = await fetch(`${API_BASE}/generic-incidents`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          content,
-          source_type: sourceType,
-          input_format: inputFormat,
-          window_minutes: Number(windowMinutes),
-          top: 25,
-        }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`generic-incidents failed: ${res.status} ${text}`);
+      const payload = {
+        content,
+        source_type: sourceType,
+        input_format: inputFormat,
+        mapping: null,
+        window_minutes: windowMinutes,
+        top,
       }
-
-      const data = await res.json();
-      setIncidentsResponse(data);
-    } catch (err) {
-      setError(err.message || "Failed to group incidents.");
+      const data = await apiNormalizedIncidents(payload)
+      setIncidentsResult(data)
+    } catch (e) {
+      setError(e.message)
     } finally {
-      setLoadingIncidents(false);
+      setLoading(false)
     }
   }
 
-  async function handleExplain(index, incident) {
-    setLoadingExplain(true);
-    setError("");
-    setSelectedIncidentId(incident.incident_id);
+  async function handleExplain(index) {
+    if (!hasIncidents) return
+    setLoading(true)
+    setError(null)
 
     try {
-      const res = await fetch(`${API_BASE}/generic-explain`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          content,
-          source_type: sourceType,
-          input_format: inputFormat,
-          window_minutes: Number(windowMinutes),
-          index,
-          first: false,
-          use_ai: false,
-        }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`generic-explain failed: ${res.status} ${text}`);
+      const payload = {
+        content,
+        source_type: sourceType,
+        input_format: inputFormat,
+        mapping: null,
+        window_minutes: windowMinutes,
+        top,
+        index,
+        first: false,
+        use_ai: useAi,
       }
-
-      const data = await res.json();
-      setExplainResponse(data);
-    } catch (err) {
-      setError(err.message || "Failed to explain incident.");
+      const data = await apiNormalizedExplain(payload)
+      setExplainResult(data)
+      setSelectedIncidentIndex(index)
+    } catch (e) {
+      setError(e.message)
     } finally {
-      setLoadingExplain(false);
+      setLoading(false)
     }
-  }
-
-  async function handleExportSelected() {
-    if (!explainResponse) return;
-    const blob = new Blob([JSON.stringify(explainResponse, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "aegislog-incident-detail.json";
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand-block">
-          <p className="eyebrow">AegisLog</p>
-          <h1>Incident workbench</h1>
-          <p className="subtle">
-            Paste logs, group related events, and inspect structured evidence.
-          </p>
+    <div
+      style={{
+        fontFamily: 'system-ui, sans-serif',
+        padding: '1.5rem',
+        maxWidth: '1200px',
+        margin: '0 auto',
+      }}
+    >
+      <h1 style={{ marginBottom: '0.5rem' }}>AegisLog UI</h1>
+      <p style={{ marginBottom: '1.5rem', color: '#555' }}>
+        Paste logs, normalize them, group incidents, and inspect explain results with optional AI analysis.
+      </p>
+
+      <section
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1.5fr 1fr',
+          gap: '1.5rem',
+          marginBottom: '1.5rem',
+        }}
+      >
+        <div>
+          <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.5rem' }}>
+            Log content
+          </label>
+          <textarea
+            value={content}
+            onChange={e => setContent(e.target.value)}
+            rows={12}
+            style={{
+              width: '100%',
+              fontFamily: 'monospace',
+              fontSize: '0.9rem',
+              borderRadius: '4px',
+              border: '1px solid #ccc',
+              padding: '0.5rem',
+              resize: 'vertical',
+            }}
+          />
         </div>
 
-        <div className="topbar-actions">
-          <button className="button secondary" onClick={() => setContent(sampleLogs)}>
-            Load sample
-          </button>
-          <button
-            className="button primary"
-            onClick={handleGroupIncidents}
-            disabled={loadingIncidents}
-          >
-            {loadingIncidents ? "Grouping..." : "Group incidents"}
-          </button>
-        </div>
-      </header>
-
-      <main className="workspace">
-        <section className="panel left-rail">
-          <div className="panel-header">
-            <div>
-              <h2>Log input</h2>
-              <p className="panel-subtitle">Send raw content to the FastAPI backend.</p>
-            </div>
-            <span className="meta-chip">Backend connected</span>
+        <div>
+          <div style={{ marginBottom: '0.75rem' }}>
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.25rem' }}>
+              Source type
+            </label>
+            <select
+              value={sourceType}
+              onChange={e => setSourceType(e.target.value)}
+              style={{ width: '100%', padding: '0.35rem', borderRadius: '4px' }}
+            >
+              {SOURCE_TYPES.map(st => (
+                <option key={st} value={st}>
+                  {st}
+                </option>
+              ))}
+            </select>
           </div>
 
-          <label className="field">
-            <span>Log content</span>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Paste JSONL or syslog text here..."
-            />
-          </label>
-
-          <div className="controls-grid">
-            <label className="field">
-              <span>Source type</span>
-              <select value={sourceType} onChange={(e) => setSourceType(e.target.value)}>
-                <option value="generic">generic</option>
-                <option value="ssh">ssh</option>
-                <option value="apache">apache</option>
-              </select>
+          <div style={{ marginBottom: '0.75rem' }}>
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.25rem' }}>
+              Input format
             </label>
+            <select
+              value={inputFormat}
+              onChange={e => setInputFormat(e.target.value)}
+              style={{ width: '100%', padding: '0.35rem', borderRadius: '4px' }}
+            >
+              {INPUT_FORMATS.map(fmt => (
+                <option key={fmt} value={fmt}>
+                  {fmt}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <label className="field">
-              <span>Input format</span>
-              <select value={inputFormat} onChange={(e) => setInputFormat(e.target.value)}>
-                <option value="jsonl">jsonl</option>
-                <option value="syslog">syslog</option>
-              </select>
-            </label>
-
-            <label className="field">
-              <span>Window minutes</span>
+          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.75rem' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.25rem' }}>
+                Window minutes
+              </label>
               <input
                 type="number"
-                min="1"
-                max="1440"
+                min={1}
+                max={1440}
                 value={windowMinutes}
-                onChange={(e) => setWindowMinutes(e.target.value)}
+                onChange={e => setWindowMinutes(Number(e.target.value))}
+                style={{ width: '100%', padding: '0.35rem', borderRadius: '4px' }}
               />
-            </label>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.25rem' }}>
+                Top
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={top}
+                onChange={e => setTop(Number(e.target.value))}
+                style={{ width: '100%', padding: '0.35rem', borderRadius: '4px' }}
+              />
+            </div>
           </div>
 
-          {error ? <div className="error-box">{error}</div> : null}
-        </section>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              marginBottom: '1rem',
+              fontWeight: 500,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={useAi}
+              onChange={e => setUseAi(e.currentTarget.checked)}
+            />
+            Use AI explanation
+          </label>
 
-        <section className="main-column">
-          <section className="stats-grid">
-            <StatCard label="Events" value={stats.totalEvents} hint="Processed input events" />
-            <StatCard label="Incidents" value={stats.totalIncidents} hint="Grouped incident buckets" />
-            <StatCard label="Parse errors" value={stats.parseErrors} hint="Lines rejected during parsing" />
-            <StatCard label="High / critical" value={stats.priorityCounts.high + stats.priorityCounts.critical} hint="Most urgent buckets" />
-          </section>
-
-          <section className="panel list-panel">
-            <div className="panel-header stacked-mobile">
-              <div>
-                <h2>Incidents</h2>
-                <p className="panel-subtitle">
-                  Review grouped incidents by severity, time, or event count.
-                </p>
-              </div>
-
-              <div className="toolbar">
-                <div className="chip-row" role="group" aria-label="Severity filter">
-                  {["all", "critical", "high", "medium", "low"].map((level) => (
-                    <button
-                      key={level}
-                      className={`filter-chip ${severityFilter === level ? "active" : ""}`}
-                      onClick={() => setSeverityFilter(level)}
-                    >
-                      {level}
-                    </button>
-                  ))}
-                </div>
-
-                <label className="sort-control">
-                  <span>Sort</span>
-                  <select value={sortMode} onChange={(e) => setSortMode(e.target.value)}>
-                    <option value="priority_desc">Priority</option>
-                    <option value="newest">Newest</option>
-                    <option value="oldest">Oldest</option>
-                    <option value="events_desc">Event count</option>
-                  </select>
-                </label>
-              </div>
-            </div>
-
-            <div className="list-summary">
-              <span>{filteredIncidents.length} shown</span>
-              <span>{stats.totalIncidents} total</span>
-            </div>
-
-            {filteredIncidents.length === 0 ? (
-              <div className="empty-state">
-                <h3>No incidents match this filter</h3>
-                <p>Try another severity level or rerun grouping with different input.</p>
-              </div>
-            ) : (
-              <div className="incident-list">
-                {filteredIncidents.map((incident) => {
-                  const originalIndex = incidents.findIndex(
-                    (item) => item.incident_id === incident.incident_id
-                  );
-
-                  return (
-                    <button
-                      key={incident.incident_id}
-                      className={`incident-row ${
-                        selectedIncidentId === incident.incident_id ? "selected" : ""
-                      }`}
-                      onClick={() => handleExplain(originalIndex, incident)}
-                    >
-                      <div className="incident-row-top">
-                        <strong>{incident.summary?.title || "Untitled incident"}</strong>
-                        <SeverityPill value={incident.priority} />
-                      </div>
-
-                      <p className="incident-description">
-                        {incident.summary?.description || "No description available."}
-                      </p>
-
-                      <div className="incident-row-meta">
-                        <span>{incident.group_key}</span>
-                        <span>{incident.event_count} event(s)</span>
-                        <span>{formatDate(incident.first_seen)}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        </section>
-
-        <section className="panel detail-panel">
-          <div className="panel-header">
-            <div>
-              <h2>Incident detail</h2>
-              <p className="panel-subtitle">
-                Structured explain output for the selected incident.
-              </p>
-            </div>
-
+          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
             <button
-              className="button secondary"
-              onClick={handleExportSelected}
-              disabled={!explainResponse}
+              type="button"
+              onClick={handleNormalize}
+              disabled={loading}
+              style={{
+                flex: 1,
+                padding: '0.5rem 0.75rem',
+                borderRadius: '4px',
+                border: '1px solid #0f766e',
+                background: '#0d9488',
+                color: '#fff',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
             >
-              Export JSON
+              {loading ? 'Working…' : 'Normalize'}
+            </button>
+            <button
+              type="button"
+              onClick={handleGroupIncidents}
+              disabled={loading}
+              style={{
+                flex: 1,
+                padding: '0.5rem 0.75rem',
+                borderRadius: '4px',
+                border: '1px solid #1d4ed8',
+                background: '#2563eb',
+                color: '#fff',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {loading ? 'Working…' : 'Group incidents'}
             </button>
           </div>
 
-          {!explainResponse ? (
-            <div className="empty-state">
-              <h3>No incident selected</h3>
-              <p>Select an incident from the list to load explanation details.</p>
+          {error && (
+            <p style={{ color: '#b91c1c', marginTop: '0.75rem', whiteSpace: 'pre-wrap' }}>
+              {error}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+        <div>
+          <h2 style={{ marginBottom: '0.5rem' }}>Normalization summary</h2>
+          {normalizeResult ? (
+            <pre
+              style={{
+                background: '#f9fafb',
+                borderRadius: '4px',
+                padding: '0.75rem',
+                fontSize: '0.85rem',
+                maxHeight: '300px',
+                overflow: 'auto',
+              }}
+            >
+              {JSON.stringify(normalizeResult.summary, null, 2)}
+            </pre>
+          ) : (
+            <p style={{ color: '#6b7280' }}>Run “Normalize” to see summary and preview.</p>
+          )}
+        </div>
+
+        <div>
+          <h2 style={{ marginBottom: '0.5rem' }}>Incidents</h2>
+          {hasIncidents ? (
+            <div
+              style={{
+                border: '1px solid #e5e7eb',
+                borderRadius: '4px',
+                maxHeight: '300px',
+                overflow: 'auto',
+              }}
+            >
+              {incidentsResult.incidents.map((inc, idx) => (
+                <div
+                  key={inc.incident_id}
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    borderBottom: '1px solid #e5e7eb',
+                    background:
+                      idx === selectedIncidentIndex ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => handleExplain(idx)}
+                >
+                  <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+                    [{idx}] {inc.summary?.title ?? inc.incident_id}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#4b5563' }}>
+                    severity={inc.severity} · priority={inc.priority} · events={inc.event_count}
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
-            <div className="detail-stack">
-              <div className="detail-hero">
-                <div>
-                  <div className="detail-hero-top">
-                    <h3>{explainResponse.incident.summary.title}</h3>
-                    <SeverityPill value={explainResponse.incident.priority} />
-                  </div>
-                  <p>{explainResponse.incident.summary.description}</p>
-                </div>
-              </div>
+            <p style={{ color: '#6b7280' }}>Run “Group incidents” to see incident clusters.</p>
+          )}
+        </div>
+      </section>
 
-              <div className="detail-grid">
-                <div className="detail-card">
-                  <h4>Classification</h4>
-                  <ul>
-                    <li>Severity: {explainResponse.incident.severity}</li>
-                    <li>Confidence: {explainResponse.incident.confidence}</li>
-                    <li>Priority: {explainResponse.incident.priority}</li>
-                    <li>Pattern: {explainResponse.incident.attack_pattern}</li>
-                  </ul>
-                </div>
-
-                <div className="detail-card">
-                  <h4>Counts</h4>
-                  <ul>
-                    <li>Events: {explainResponse.incident.event_count}</li>
-                    <li>Errors: {explainResponse.incident.error_count}</li>
-                    <li>Warnings: {explainResponse.incident.warning_count}</li>
-                    <li>Hosts: {explainResponse.incident.distinct_hosts}</li>
-                  </ul>
-                </div>
-              </div>
-
-              <div className="detail-card">
-                <h4>Highlights</h4>
-                <ul>
-                  {explainResponse.incident_evidence.highlights.map((item, idx) => (
-                    <li key={idx}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="detail-card">
-                <h4>Sample events</h4>
-                <pre>
-                  {JSON.stringify(
-                    explainResponse.incident_evidence.extra?.sample_events || [],
-                    null,
-                    2
-                  )}
+      <section style={{ marginTop: '1.5rem' }}>
+        <h2 style={{ marginBottom: '0.5rem' }}>Explain result</h2>
+        {explainResult ? (
+          <>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '1.5rem',
+                marginBottom: '1.5rem',
+              }}
+            >
+              <div>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.25rem' }}>Incident</h3>
+                <pre
+                  style={{
+                    background: '#f9fafb',
+                    borderRadius: '4px',
+                    padding: '0.75rem',
+                    fontSize: '0.85rem',
+                    maxHeight: '260px',
+                    overflow: 'auto',
+                  }}
+                >
+                  {JSON.stringify(explainResult.incident, null, 2)}
                 </pre>
               </div>
-
-              {selectedIncident ? (
-                <div className="detail-card subtle-card">
-                  <h4>Selected bucket</h4>
-                  <ul>
-                    <li>Group key: {selectedIncident.group_key}</li>
-                    <li>First seen: {formatDate(selectedIncident.first_seen)}</li>
-                    <li>Last seen: {formatDate(selectedIncident.last_seen)}</li>
-                    <li>Event count: {selectedIncident.event_count}</li>
-                  </ul>
-                </div>
-              ) : null}
+              <div>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.25rem' }}>Evidence</h3>
+                <pre
+                  style={{
+                    background: '#f9fafb',
+                    borderRadius: '4px',
+                    padding: '0.75rem',
+                    fontSize: '0.85rem',
+                    maxHeight: '260px',
+                    overflow: 'auto',
+                  }}
+                >
+                  {JSON.stringify(explainResult.incident_evidence, null, 2)}
+                </pre>
+              </div>
             </div>
-          )}
 
-          {loadingExplain ? <div className="loading-note">Loading incident detail…</div> : null}
-        </section>
-      </main>
+            <div>
+              <h3 style={{ fontSize: '1rem', marginBottom: '0.25rem' }}>AI analysis</h3>
+              {explainResult.ai_analysis ? (
+                <pre
+                  style={{
+                    background: '#ecfeff',
+                    border: '1px solid #a5f3fc',
+                    borderRadius: '4px',
+                    padding: '0.75rem',
+                    fontSize: '0.85rem',
+                    overflow: 'auto',
+                  }}
+                >
+                  {JSON.stringify(explainResult.ai_analysis, null, 2)}
+                </pre>
+              ) : explainResult.ai_error ? (
+                <div
+                  style={{
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    color: '#991b1b',
+                    borderRadius: '4px',
+                    padding: '0.75rem',
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {explainResult.ai_error}
+                </div>
+              ) : (
+                <p style={{ color: '#6b7280' }}>
+                  No AI analysis returned. Turn on “Use AI explanation” and click an incident.
+                </p>
+              )}
+            </div>
+          </>
+        ) : (
+          <p style={{ color: '#6b7280' }}>
+            Click an incident to fetch explain output{useAi ? ' with AI enabled' : ''}.
+          </p>
+        )}
+      </section>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App
