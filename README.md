@@ -1,50 +1,49 @@
+***
+
 # AegisLog
 
-AegisLog is an AI‑powered log analysis and triage service focused on authentication and web access logs. Instead of doing classic supervised classification like SentinelTI, AegisLog uses unsupervised anomaly detection, clustering, and AI explanations to help engineers quickly understand and respond to unusual behavior in their systems.
+AegisLog is an AI‑powered log analysis and triage service focused on authentication and web access logs. It combines normalization, incident grouping, and optional AI explanations to help engineers quickly understand and respond to unusual behavior in their systems.
 
 It lives at the intersection of AI, software engineering, and cybersecurity:
 
-- **AI**: anomaly detection, clustering, semantic-log-style evidence, LLM-style structured explanations.
-- **Software engineering**: robust pipelines, CLI & API, SQLite tracking, performance for large batches.
+- **AI**: anomaly detection, clustering, structured evidence, LLM-style explanations.
+- **Software engineering**: robust pipelines, CLI & HTTP API, strong tests.
 - **Cybersecurity flavor**: emphasis on auth attacks, recon/scans, and misconfigurations that have security impact.
+
+***
 
 ## Features
 
 - **Log ingestion and normalization**  
-  Ingests raw authentication and web access logs from files or HTTP requests and normalizes them into a consistent event schema (timestamp, IP, user, path, status, user agent, raw text, etc.).
+  Ingests raw authentication and web access logs from files or HTTP requests and normalizes them into a consistent event schema (`NormalizedEvent`: timestamp, IPs, user, host, service, severity, event category/action, raw text, etc.).
 
-- **Session and IP behavior modeling**  
-  Groups individual log events into sessions (user/IP/user‑agent over time) and per‑IP windows, then computes rich behavioral features such as request counts, session duration, failed vs successful login ratios, status code patterns, unique endpoints touched, and after‑hours activity.
+- **Generic “bring your own logs” pipeline**  
+  Supports generic JSONL and RFC 3164–style syslog, with optional field mappings to adapt arbitrary log formats into the normalized schema.
 
-- **Unsupervised anomaly detection**  
-  Uses unsupervised models (Isolation Forest, with options for other anomaly models) trained on mostly normal behavior to assign anomaly scores to each session/IP without needing labeled attack data, and maps scores into risk levels (low/medium/high).
+- **Source‑specific adapters for SSH and Apache**  
+  Provides SSH- and Apache-aware parsing, summarization, and incident evidence while reusing the same normalized event model.
 
-- **Incident clustering instead of alert floods**  
-  For SSH authentication logs, clusters related anomalous sessions into higher‑level incidents so you review a handful of incidents instead of thousands of isolated anomalies.
+- **Incident grouping instead of alert floods**  
+  Groups related normalized events into incidents so you review coherent clusters instead of thousands of isolated events.
 
-- **LLM‑style explanations and categories**  
-  For SSH incidents, Apache sessions, and normalized generic incidents, AI-style explain flows build structured evidence from anomaly scores and features, then generate human‑readable analyses (e.g., “Likely credential stuffing from a single IP”) plus hypotheses, caveats, and next‑step recommendations.
-
-- **Security‑flavored behavior detection**  
-  Focuses on patterns that matter for security and reliability, including password spraying, credential stuffing, brute‑force login attempts, reconnaissance/scanning of many endpoints, and sudden error spikes on sensitive paths.
-
-- **Triage workflow and feedback loop** *(planned)*  
-  Will store incidents, anomaly scores, and explanations in SQLite, and let analysts mark incidents as “true incident” or “benign,” enabling threshold tuning and simple learning from past triage decisions.
+- **AI‑style explanations and categories**  
+  For SSH incidents, Apache sessions, and generic/normalized incidents, AI explain flows take structured evidence and generate human‑readable analyses (summary, hypothesis, caveats, next steps, optional playbook hints).
 
 - **Developer‑friendly CLI and HTTP API**  
-  Provides a CLI to train models and analyze log files today, and a FastAPI HTTP API is planned for per‑session anomaly detection and incident‑level analysis, suitable for integration into dev, SRE, or SecOps workflows.
+  Ships with a CLI for local analysis and automation, plus a FastAPI HTTP API for integrating normalization, incident grouping, and explain flows into other systems (and the upcoming React UI).
 
-- **Experiment tracking and evaluation** *(planned)*  
-  Will track model versions, feature configurations, and evaluation metrics in SQLite so you can compare different anomaly models and feature sets on small labeled benchmarks in a reproducible way.
+***
 
 ## Tech stack
 
 - Python 3.10+
 - FastAPI for the HTTP API
-- scikit-learn for anomaly detection (Isolation Forest and variants)
-- SQLite for experiment tracking and triage history
+- scikit-learn for anomaly detection
+- SQLite (planned) for experiment tracking and triage history
 - Pytest for tests
-- (Optional) Sentence-transformer / small embedding model for semantic log analysis
+- Optional embedding/LLM backend for AI explanations
+
+***
 
 ## Quick start
 
@@ -85,28 +84,127 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 4. Run the CLI
+### 4. Run tests (optional but recommended)
+
+```bash
+python -m pytest
+```
+
+You should see the full test suite pass.
+
+### 5. Run the CLI
 
 ```bash
 python -m aegislog.cli --help
 ```
 
-### 5. Run the API (dev placeholder)
+### 6. Run the HTTP API
 
 ```bash
-uvicorn aegislog.api:app --host 0.0.0.0 --port 8080 --reload
+uvicorn aegislog.api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-## Bring your own logs
+Then open:
 
-AegisLog can normalize **generic logs** into a common schema, then reuse the same incident grouping and AI explanation flows you get for SSH and Apache.
+- Interactive docs: http://localhost:8000/docs  
+- Health check: http://localhost:8000/health
 
-Two main input formats are supported:
+***
+
+## Web UI (React + Vite)
+
+AegisLog includes a simple React UI for interactive triage on top of the HTTP API.
+
+### 1. Start the backend API
+
+In one terminal, from the project root:
+
+```bash
+uvicorn aegislog.api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+The OpenAPI docs will be available at `http://localhost:8000/docs`.
+
+### 2. Start the frontend (Vite)
+
+The frontend lives in the `aegislog-ui` folder created by Vite.
+
+From the repo root:
+
+```bash
+cd aegislog-ui
+npm install      # first time only
+npm run dev
+```
+
+This will start the dev server on `http://localhost:5173`.
+
+During development, Vite proxies `/api/*` requests to the FastAPI backend running on port 8000, so the UI can call endpoints like `/api/normalize` and `/api/normalized-explain` without hardcoding full URLs.
+
+### 3. Using the UI
+
+1. Open `http://localhost:5173` in your browser.
+2. Paste JSONL or syslog log content into the **Log content** box (the UI includes a sample JSONL snippet by default).
+3. Choose:
+   - `source_type` (e.g. `generic`)
+   - `input_format` (`jsonl` or `syslog`)
+   - `window_minutes` and `top`.
+4. Click **Normalize** to see:
+   - A summary of total events.
+   - Severity and event category/action counts.
+5. Click **Group incidents** to:
+   - Run the normalized incident grouping.
+   - See a list of incidents (severity, priority, event counts).
+6. Click an incident to:
+   - Fetch a **normalized explain** response.
+   - View both the incident object and structured evidence.
+7. Check **Use AI explanation** before clicking an incident if you want the backend to attempt AI analysis. The UI will display:
+   - `ai_analysis` (structured AI explanation) when available, or
+   - `ai_error` when AI is not configured or fails gracefully.
+
+The UI is intended as a thin, developer-friendly layer over the HTTP API to make it easy to demo and debug normalization, incident grouping, and explain flows interactively.
+
+## Bring your own logs (generic pipeline)
+
+AegisLog can normalize **generic logs** into a common schema and then reuse the same incident grouping and explain flows used for SSH and Apache.
+
+Supported generic input formats:
 
 - **JSONL** (`--input-format jsonl`, default): one JSON object per line.
-- **Syslog-style text** (`--input-format syslog`): classic RFC 3164 style with a `<PRI>` prefix, timestamp, hostname, and message.
+- **Syslog-style text** (`--input-format syslog`): classic RFC 3164 style.
 
-You can optionally provide a **field mapping** to adapt your custom fields into AegisLog’s normalized schema.
+You can optionally provide a **mapping** to adapt your custom fields into AegisLog’s normalized schema.
+
+### Mapping schema
+
+Canonical mapping structure (JSON or YAML):
+
+```yaml
+source_type: generic_jsonl
+fields:
+  timestamp:
+    - "@timestamp"
+    - "time"
+    - "ts"
+  src_ip:
+    - "client_ip"
+    - "ip"
+  user:
+    - "username"
+    - "account"
+  message:
+    - "msg"
+    - "event_message"
+  severity:
+    - "level"
+    - "log_level"
+defaults:
+  event_category: auth
+```
+
+- `fields` maps normalized field names to one or more source aliases.
+- `defaults` provides fallback values.
+- `source_type` can override the logical label for generic inputs.
 
 ### Normalize generic JSONL
 
@@ -126,9 +224,9 @@ python -m aegislog.cli normalize \
 
 This will:
 
-- parse each JSONL line,
-- apply the mapping (if provided) into the normalized event schema,
-- print a summary plus a preview of normalized events.
+- parse each JSONL line
+- apply the mapping (if provided)
+- produce a summary and a preview of normalized events
 
 ### Normalize generic syslog
 
@@ -138,7 +236,7 @@ python -m aegislog.cli normalize \
   --input-format syslog
 ```
 
-The syslog parser extracts basic fields such as timestamp, host, severity/level, and message from RFC 3164–style headers.
+The syslog parser extracts timestamp, host, severity (from PRI), service/pid (from the tag), and message.
 
 ### Group generic events into incidents
 
@@ -155,18 +253,20 @@ python -m aegislog.cli generic-incidents \
 python -m aegislog.cli generic-incidents \
   data/sample_generic.jsonl \
   --mapping mapping/example_auth_app.yaml \
+  --window-minutes 15 \
   --top 5
 
 # Syslog
 python -m aegislog.cli generic-incidents \
   data/sample_syslog.log \
   --input-format syslog \
+  --window-minutes 15 \
   --top 5
 ```
 
 ### Explain generic incidents with AI
 
-You can get AI-backed explanations for generic incidents, similar to SSH/Apache:
+You can get AI-backed explanations for generic incidents:
 
 ```bash
 # Explain one generic incident (JSONL)
@@ -177,7 +277,7 @@ python -m aegislog.cli generic-explain \
   --format json \
   --output generic_explain_ai.json
 
-# Explain one generic incident (syslog)
+# Explain the first generic incident (syslog)
 python -m aegislog.cli generic-explain \
   data/sample_syslog.log \
   --input-format syslog \
@@ -185,7 +285,9 @@ python -m aegislog.cli generic-explain \
   --use-ai
 ```
 
-### Normalized incident flows across sources
+***
+
+## Normalized incident flows across sources
 
 AegisLog can also operate directly on normalized events from SSH, Apache, and generic logs:
 
@@ -202,8 +304,11 @@ python -m aegislog.cli normalized-incidents \
 python -m aegislog.cli normalized-incidents \
   data/loghub/Apache.log \
   --source-type apache
+```
 
-# Explain a normalized incident with AI
+Explain a normalized incident with AI:
+
+```bash
 python -m aegislog.cli normalized-explain \
   data/sample_generic.jsonl \
   --source-type generic \
@@ -213,7 +318,57 @@ python -m aegislog.cli normalized-explain \
 
 For `source-type generic`, you can combine `--input-format` (`jsonl` / `syslog`) with an optional `--mapping` file.
 
-## CLI
+***
+
+## HTTP API
+
+The FastAPI layer exposes a small set of endpoints for programmatic access and frontend integration.
+
+### Endpoints
+
+- `GET /health` – Basic health check.
+- `POST /normalize` – Normalize logs and compute a summary + preview.
+- `POST /generic-incidents` – Group generic logs into incidents.
+- `POST /normalized-incidents` – Group normalized events from generic/SSH/Apache into incidents.
+- `POST /generic-explain` – Explain a single generic incident (optional AI).
+- `POST /normalized-explain` – Explain a single normalized incident (optional AI).
+
+### Request model (simplified)
+
+For `/normalize` and incident endpoints, the base request model looks like:
+
+```json
+{
+  "content": "<raw log text>",
+  "source_type": "generic | ssh | apache",
+  "input_format": "jsonl | syslog",
+  "mapping": { ... },         // only for source_type="generic"
+  "window_minutes": 15,
+  "top": 5
+}
+```
+
+Explain endpoints extend this with:
+
+```json
+{
+  "index": 0,
+  "first": false,
+  "use_ai": false
+}
+```
+
+Validation rules:
+
+- `content` must not be empty.
+- `mapping` is only allowed for `source_type="generic"`.
+- Unknown fields are rejected.
+
+You can explore and try these endpoints interactively at `/docs` once the server is running.
+
+***
+
+## CLI overview
 
 Main entrypoint:
 
@@ -221,146 +376,52 @@ Main entrypoint:
 python -m aegislog.cli <subcommand> [options]
 ```
 
-Current subcommands:
+Key subcommands:
 
-- `init`
-- `train`
-- `analyze`
-- `incidents`
-- `explain`
-- `ai-explain`
-- `report`
-- `normalize`
-- `normalize-ssh`
-- `normalize-apache`
-- `generic-incidents`
-- `generic-explain`
-- `normalized-incidents`
-- `normalized-explain`
-- `examples`
+- `analyze` – Run session/incident analysis for SSH/Apache.
+- `incidents` – Group SSH sessions into incidents.
+- `explain`, `ai-explain`, `report` – SSH explain/report flows.
+- `normalize`, `normalize-ssh`, `normalize-apache` – Normalization.
+- `generic-incidents`, `generic-explain` – Generic pipeline.
+- `normalized-incidents`, `normalized-explain` – Normalized pipeline across sources.
+- `examples` – Show example command usages.
 
-Additional Apache‑specific CLI:
-
-- `cli_apache` (run via `python -m aegislog.cli_apache`)
-
-### Common CLI examples
-
-Analyze a log file and print top anomalous sessions (human‑readable):
+There is also a dedicated Apache CLI:
 
 ```bash
-# Apache error log
-python -m aegislog.cli analyze data/loghub/Apache.log --log-type apache_error
-
-# SSH auth log
-python -m aegislog.cli analyze data/loghub/SSH.log --log-type ssh_auth
+python -m aegislog.cli_apache --help
 ```
 
-Group anomalous SSH sessions into incidents:
+for Apache-focused workflows.
 
-```bash
-python -m aegislog.cli incidents \
-  data/loghub/SSH.log \
-  --log-type ssh_auth \
-  --min-severity medium \
-  --top 5
-```
-
-Explain a single SSH incident, optionally with AI‑style analysis:
-
-```bash
-# Evidence-style explain (no AI analysis)
-python -m aegislog.cli explain \
-  data/loghub/SSH.log \
-  --log-type ssh_auth \
-  --min-severity high \
-  --first
-
-# AI-augmented explain JSON bundle
-python -m aegislog.cli explain \
-  data/loghub/SSH.log \
-  --log-type ssh_auth \
-  --first \
-  --use-llm \
-  --format json \
-  --output explain_ai.json
-```
-
-Use the dedicated Apache CLI to inspect sessions, explain one, see a report, or get AI analysis:
-
-```bash
-# Top suspicious sessions (text)
-python -m aegislog.cli_apache data/loghub/Apache.log --top 20
-
-# Explain a single suspicious Apache session with evidence
-python -m aegislog.cli_apache \
-  data/loghub/Apache.log \
-  --explain \
-  --first
-
-# Aggregate Apache report
-python -m aegislog.cli_apache \
-  data/loghub/Apache.log \
-  --report
-
-# AI-augmented Apache explain (structured analysis)
-python -m aegislog.cli_apache \
-  data/loghub/Apache.log \
-  --ai-explain \
-  --first \
-  --format json \
-  --output apache_explain_ai.json
-```
-
-For generic logs and normalized flows, see `cli_usage_cheatsheet.md` for a more detailed walkthrough.
-
-### When to use explain vs AI explain
-
-- Use `explain` / `--explain` (SSH and Apache) when you want deterministic, evidence‑style output that directly reflects anomaly scores and features.
-- Use AI explain:
-  - SSH: `--use-llm` with `aegislog explain`
-  - Apache: `--ai-explain` with `cli_apache`
-  - Generic: `--use-ai` with `generic-explain` or `normalized-explain --source-type generic`  
-  when you want structured narrative analysis, hypotheses, and recommended next steps generated from that evidence.
-
-## HTTP API (planned)
-
-- `GET /health` – Basic health check.
-- `POST /detect-sessions` – Scores sessions/IPs and returns anomaly scores.
-- `POST /detect-incidents` – Runs detection, clustering, and explanation to produce incidents.
-
-Authentication: future versions will support an API key via `X-API-KEY`.
+***
 
 ## Datasets
 
-AegisLog is developed and tested using subsets of public research datasets from the Loghub collection (https://github.com/logpai/loghub):
+AegisLog is developed and tested using subsets of public research datasets from the Loghub collection:
 
-- **Apache error logs** – used to model abnormal web server error behavior over time (e.g., bursts of `[error]` vs `[notice]` events).
-- **SSH authentication logs** – used to model authentication behavior such as repeated failed login attempts from the same IP or across many users.
+- Apache error logs
+- SSH authentication logs
 
-Only small samples of these datasets are stored in the repository. Larger raw log files (for example, the full Loghub SSH log) are expected to be downloaded locally by the user for training and experimentation.
+Only small samples are stored in the repo. Larger raw log files are expected to be downloaded by the user for local training and experimentation.
 
-## How it works (high level)
-
-1. **Parse logs**  
-   Raw auth/access logs are parsed into a normalized event schema (timestamp, IP, user, path, status, user-agent, etc.).
-
-2. **Build behavioral features**  
-   Events are grouped into sessions and per-IP windows, and features like event count, duration, failed login ratio, status code pattern, and night-time activity are computed.
-
-3. **Detect anomalies**  
-   An Isolation Forest model (and optional variants) trained on mostly-normal data assigns an anomaly score to each session/IP. Scores are mapped to risk levels.
-
-4. **Group into incidents**  
-   For SSH, anomalous sessions/IPs are clustered into incidents so analysts can review a handful of groups instead of thousands of individual events. For generic/normalized logs, heuristic grouping runs directly on normalized events.
-
-5. **Explain incidents and sessions (AI explainer)**  
-   For SSH incidents, selected Apache sessions, and generic/normalized incidents, AegisLog builds structured evidence and, when enabled, runs AI-style analysis to summarize patterns, propose likely categories, and recommend investigation steps.
+***
 
 ## Project status
 
-Early development. CLI/API commands and models are evolving as AI and detection features are iterated.
+The **backend** (parsing, normalization, incident grouping, explain flows, CLI, and HTTP API) is implemented and covered by automated tests.
+
+Planned / in progress:
+
+- React frontend for interactive triage on top of the HTTP API.
+- SQLite-backed triage store and experiment tracking.
+- Additional source-specific adapters and mapping recipes.
+
+***
 
 ## Author
 
 Name: Dong Quan Tran (Johnny)  
 GitHub: https://github.com/dong-quan-tran
+
+***

@@ -1,144 +1,176 @@
 # AegisLog Architecture Overview
 
-This document gives a short, practical overview of how AegisLog processes logs from raw input to grouped incidents and AI-assisted explanations.
+This document describes how AegisLog processes logs from raw input to grouped incidents and structured explain output across the CLI and HTTP API.
 
-## Pipeline summary
+## System summary
 
-At a high level, AegisLog follows this flow:
+AegisLog is organized as a layered log-analysis pipeline:
 
 1. Parsers ingest raw logs from source-specific or generic formats.
-2. Adapters and loaders convert parsed records into `NormalizedEvent`.
+2. Loaders and adapters convert parsed records into a shared `NormalizedEvent` model.
 3. Incident grouping logic clusters related events into incidents.
-4. Evidence builders turn incidents plus supporting events into structured evidence.
-5. AI explain flows optionally generate natural-language analysis from that evidence.
+4. Evidence builders turn incidents and supporting events into structured investigation context.
+5. Optional AI explain flows generate analyst-friendly summaries from structured evidence.
 
 In shorthand:
 
 ```text
 raw logs
   -> parsers
-  -> adapters / normalized loader
+  -> loaders / adapters
   -> NormalizedEvent
   -> incident grouping
   -> incident evidence
-  -> AI explain
+  -> optional AI explain
 ```
 
-## Parsers
+## Supported input paths
 
-AegisLog currently supports both source-specific and generic parsing paths.
+AegisLog supports both source-specific and generic ingestion.
 
-### Source-specific parsing
+### Source-specific inputs
 
 - SSH authentication logs
 - Apache error logs
 
-These paths use source-aware parsing and source-aware summarization / evidence logic.
+These paths use source-aware parsing, source-aware summarization, and source-aware evidence logic.
 
-### Generic parsing
+### Generic inputs
 
-The generic pipeline is designed for “bring your own logs” workflows.
+The generic pipeline is designed for bring-your-own-log workflows.
 
 Supported generic input formats:
 
 - JSONL: one JSON object per line
 - Syslog-style text: RFC 3164-style messages
 
-Generic logs may optionally use a mapping file to map custom source fields into the normalized schema.
+Generic logs may optionally include a mapping configuration so custom source fields can be normalized into the shared schema.
 
-## Adapters and normalized loading
+## Core layers
 
-The normalization layer exists to turn different log shapes into a shared internal event model.
+### Parsing layer
 
-Core idea:
+The parsing layer handles source syntax.
 
-- raw records can come from SSH logs, Apache logs, JSONL, or syslog
-- the loader resolves the appropriate parser
-- parsed records are converted into `NormalizedEvent`
+Responsibilities:
+- Read raw files or raw text input.
+- Parse JSONL records or syslog messages.
+- Extract coarse source fields from source-specific logs.
+- Preserve raw context where useful.
 
-For generic JSONL logs, a mapping file can define how fields like:
+Generic syslog parsing currently supports RFC 3164-style timestamps, hostnames, message bodies, and common `service[pid]: message` patterns.
 
-- `client_ip -> src_ip`
-- `username -> user`
-- `hostname -> host`
-- `app -> service`
-- `status -> status_code`
-- `message -> message`
+### Mapping layer
 
-flow into normalized events.
+The mapping layer lets generic logs describe how source fields map into the normalized schema.
 
-This keeps downstream grouping and explain logic independent of the original log format.
+Canonical mapping structure:
 
-## NormalizedEvent
+```yaml
+source_type: generic_jsonl
+fields:
+  timestamp:
+    - "@timestamp"
+    - "time"
+    - "ts"
+  src_ip:
+    - "client_ip"
+    - "ip"
+  user:
+    - "username"
+    - "account"
+  message:
+    - "msg"
+    - "event_message"
+defaults:
+  event_category: auth
+```
 
-`NormalizedEvent` is the common event schema used across the generic and normalized flows.
+Behavior:
+- `fields` maps normalized field names to one or more source aliases.
+- `defaults` injects fallback values when the source record does not provide them.
+- `source_type` may override the normalized source label for generic inputs.
+- Mapping files may be JSON or YAML.
+- Internally, mappings are normalized into a canonical shape where aliases are stored as lists.
 
-Typical fields include:
+The mapping layer exists only for `source_type="generic"`.
 
-- timestamp
-- message
-- severity
-- event category
-- event action
-- source IP
-- destination IP
-- user
-- host
-- service
-- status code
-- session hint
-- raw / source context where needed
+### Normalization layer
 
-The goal is not to perfectly preserve every source-specific nuance in one model, but to preserve enough consistent structure to support grouping, summarization, and explanation across sources.
+The normalization layer converts different parsed records into a shared internal model: `NormalizedEvent`.
 
-## Incident grouping
+Typical normalized fields include:
+
+- `timestamp`
+- `source_type`
+- `raw_message`
+- `event_category`
+- `event_action`
+- `severity`
+- `src_ip`
+- `dst_ip`
+- `user`
+- `host`
+- `service`
+- `status_code`
+- `message`
+- `session_hint`
+- `extra`
+
+Design goals:
+- Preserve a stable downstream schema.
+- Keep the most useful investigation fields in canonical positions.
+- Preserve unmapped or source-specific fields in `extra`.
+
+This allows grouping, summarization, and explain logic to remain mostly independent of original source format.
+
+### Incident grouping layer
 
 Once events are normalized, AegisLog groups them into incidents.
 
-### SSH incident path
+#### Source-specific path
 
-SSH has a more mature source-specific incident pipeline built around anomalous sessions, IP behavior, severity, confidence, and attack pattern logic.
+SSH has a more mature source-specific incident path built around anomalous sessions, attack patterns, severity, and confidence logic.
 
-### Generic / normalized incident path
+Apache also has source-aware parsing and evidence support.
 
-The generic and normalized flows group normalized events using source-agnostic heuristics such as:
+#### Generic / normalized path
 
-- time window proximity
-- grouping keys derived from source IP, host, user, or other event hints
-- error / warning bursts
+The generic and normalized incident paths operate on `NormalizedEvent` objects using source-agnostic heuristics such as:
+
+- time-window proximity
+- grouping keys derived from source IP, host, user, or session hints
+- error and warning bursts
 - repeated auth failures
-- coarse suspicious patterns
+- coarse suspicious activity patterns
 
-This gives AegisLog a common incident path that works even when no source-specific anomaly model exists.
+This design allows incident grouping even when no specialized anomaly model exists for a source.
 
-## Incident evidence
+### Evidence layer
 
 After an incident is selected, AegisLog builds structured evidence for it.
 
 Evidence may include:
-
 - event counts
-- error and warning totals
+- warning and error totals
 - distinct users, hosts, and source IPs
-- first and last seen timestamps
-- representative example events
-- source-specific metrics for SSH or Apache where applicable
+- first-seen and last-seen timestamps
+- representative sample events
+- source-specific summary metrics when applicable
 
-This evidence is the bridge between raw detection logic and human-readable explanations.
+This layer is the bridge between machine grouping logic and human-readable explain output.
 
-## AI explain flows
+### AI explain layer
 
-AegisLog supports AI-assisted explain flows on top of structured evidence.
+AegisLog supports optional AI-assisted explain flows on top of structured evidence.
 
 Current explain paths include:
-
 - SSH explain / AI explain
 - Apache explain / AI explain
 - Generic explain
-- Normalized explain across generic, SSH, and Apache sources
+- Normalized explain across generic, SSH, and Apache inputs
 
-The AI layer does not replace parsing, normalization, or incident logic. Instead, it consumes already-structured evidence and produces:
-
+The AI layer does not perform parsing or detection. It consumes structured evidence and produces:
 - summary
 - evidence bullets
 - hypothesis
@@ -146,16 +178,113 @@ The AI layer does not replace parsing, normalization, or incident logic. Instead
 - next steps
 - optional playbook hints
 
-This design keeps the system grounded in structured signals even when AI is enabled.
+This design keeps AI grounded in structured evidence rather than raw logs alone.
+
+## Interfaces
+
+AegisLog exposes the same backend capabilities through both a CLI and an HTTP API.
+
+### CLI
+
+The CLI supports:
+- normalization
+- generic incidents
+- normalized incidents
+- generic explain
+- normalized explain
+- existing SSH and Apache explain/report flows
+
+The CLI is intended for local analysis, scripting, and development workflows.
+
+### HTTP API
+
+The FastAPI layer exposes:
+- `GET /health`
+- `POST /normalize`
+- `POST /generic-incidents`
+- `POST /normalized-incidents`
+- `POST /generic-explain`
+- `POST /normalized-explain`
+
+Request models enforce:
+- `source_type` in `generic | ssh | apache`
+- `input_format` in `jsonl | syslog`
+- `mapping` allowed only for `source_type="generic"`
+- `content` must not be empty
+- unknown request fields are rejected
+
+The API is intended to support the React frontend and other programmatic clients.
+
+### Service layer
+
+Between the API routes and the domain logic, AegisLog uses a small service layer (`services_api.py`).
+
+Responsibilities:
+- accept raw log text content
+- write temporary files when parsers require file-style input
+- call loaders and incident logic
+- shape consistent response payloads
+- attach optional AI analysis
+- clean up temporary artifacts
+
+This layer keeps the FastAPI routes thin and keeps business logic reusable.
+
+## Request and data flow
+
+### Normalize flow
+
+```text
+raw content
+  -> source_type + input_format selection
+  -> parser / loader
+  -> NormalizedEvent[]
+  -> summary + preview
+```
+
+### Incidents flow
+
+```text
+NormalizedEvent[]
+  -> incident grouping
+  -> incident list
+```
+
+### Explain flow
+
+```text
+NormalizedEvent[]
+  -> incident grouping
+  -> selected incident
+  -> evidence builder
+  -> optional AI analysis
+  -> structured response
+```
 
 ## Design intent
 
 The architecture is intentionally layered:
 
 - parsing handles source syntax
+- mapping handles source-to-schema adaptation
 - normalization handles schema consistency
 - grouping handles incident logic
 - evidence handles investigation context
 - AI handles explanation
 
-That separation makes it easier to add new input formats, new mappings, and new source adapters without rewriting the whole pipeline.
+This separation makes it easier to:
+- add new input formats
+- add new source adapters
+- expand mapping behavior
+- keep API and CLI outputs aligned
+- improve explain quality without changing detection logic
+
+## Current status
+
+At the current stage of the project, the backend supports:
+- generic JSONL normalization
+- generic syslog normalization
+- structured field mappings
+- incident grouping for generic and normalized flows
+- explain flows with optional AI analysis
+- FastAPI endpoints aligned with CLI behavior
+- automated test coverage across the implemented backend paths
