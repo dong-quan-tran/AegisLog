@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import argparse
 import json
+import sys
 
 from aegislog.cli_common import write_output, session_row_to_dict
 from aegislog.cli_analyze import register_analyze_parser
@@ -43,7 +46,12 @@ __all__ = [
 ]
 
 
-def cmd_examples(args: argparse.Namespace) -> None:
+def _write_json_payload(payload: dict, output_path: str | None = None) -> int:
+    write_output(json.dumps(payload, indent=2), output_path)
+    return 0
+
+
+def cmd_examples(args: argparse.Namespace) -> int:
     print("Example commands:")
     print("  aegislog analyze data/loghub/SSH.log --log-type ssh_auth --profile ssh")
     print("  aegislog incidents data/loghub/SSH.log --log-type ssh_auth")
@@ -69,16 +77,19 @@ def cmd_examples(args: argparse.Namespace) -> None:
     print("  aegislog normalized-explain data/sample_syslog.log --source-type generic --input-format syslog --first --use-ai")
     print("  aegislog normalized-explain data/loghub/SSH.log --source-type ssh --index 0 --use-ai")
     print("  aegislog normalized-explain data/loghub/Apache.log --source-type apache --index 0 --use-ai")
+    return 0
 
 
-def cmd_init(args: argparse.Namespace) -> None:
+def cmd_init(args: argparse.Namespace) -> int:
     print("Init placeholder: will set up SQLite experiment DB.")
+    return 0
 
 
-def cmd_train(args: argparse.Namespace) -> None:
+def cmd_train(args: argparse.Namespace) -> int:
     from aegislog.ml.train import main as train_main
 
     train_main()
+    return 0
 
 
 def cmd_normalize(args: argparse.Namespace) -> int:
@@ -101,6 +112,7 @@ def cmd_normalize(args: argparse.Namespace) -> int:
 
     payload = {
         "path": args.path,
+        "source_type": "generic",
         "input_format": args.input_format,
         "mapping": getattr(args, "mapping", None),
         "summary": summary,
@@ -109,15 +121,10 @@ def cmd_normalize(args: argparse.Namespace) -> int:
     }
 
     if args.format == "json":
-        text = json.dumps(payload, indent=2)
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(text + "\n")
-        else:
-            print(text)
-        return 0
+        return _write_json_payload(payload, getattr(args, "output", None))
 
     print(f"Normalized {summary['total_events']} event(s) from {args.path}")
+    print(f"Input format: {args.input_format}")
     if getattr(args, "mapping", None):
         print(f"Using mapping file: {args.mapping}")
     print(f"Previewing first {len(preview)} event(s)")
@@ -165,13 +172,7 @@ def cmd_normalize_ssh(args: argparse.Namespace) -> int:
     }
 
     if args.format == "json":
-        text = json.dumps(payload, indent=2)
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(text + "\n")
-        else:
-            print(text)
-        return 0
+        return _write_json_payload(payload, getattr(args, "output", None))
 
     print(f"Normalized {summary['total_events']} SSH event(s) from {args.path}")
     print(f"Previewing first {len(preview)} event(s)")
@@ -213,13 +214,7 @@ def cmd_normalize_apache(args: argparse.Namespace) -> int:
     }
 
     if args.format == "json":
-        text = json.dumps(payload, indent=2)
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(text + "\n")
-        else:
-            print(text)
-        return 0
+        return _write_json_payload(payload, getattr(args, "output", None))
 
     print(f"Normalized {summary['total_events']} Apache event(s) from {args.path}")
     print(f"Previewing first {len(preview)} event(s)")
@@ -257,6 +252,7 @@ def cmd_generic_incidents(args: argparse.Namespace) -> int:
 
     payload = {
         "path": args.path,
+        "source_type": "generic",
         "input_format": args.input_format,
         "mapping": getattr(args, "mapping", None),
         "window_minutes": args.window_minutes,
@@ -267,15 +263,10 @@ def cmd_generic_incidents(args: argparse.Namespace) -> int:
     }
 
     if args.format == "json":
-        text = json.dumps(payload, indent=2)
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(text + "\n")
-        else:
-            print(text)
-        return 0
+        return _write_json_payload(payload, getattr(args, "output", None))
 
     print(f"Grouped {len(events)} event(s) into {len(incidents)} generic incident(s)")
+    print(f"Input format: {args.input_format}")
     if getattr(args, "mapping", None):
         print(f"Using mapping file: {args.mapping}")
     print(f"Showing top {min(len(incidents), args.top)} incident(s)")
@@ -334,18 +325,14 @@ def cmd_normalized_incidents(args: argparse.Namespace) -> int:
     }
 
     if args.format == "json":
-        text = json.dumps(payload, indent=2)
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(text + "\n")
-        else:
-            print(text)
-        return 0
+        return _write_json_payload(payload, getattr(args, "output", None))
 
     print(
         f"Grouped {len(events)} normalized {args.source_type} event(s) into "
         f"{len(incidents)} incident(s)"
     )
+    if args.source_type == "generic":
+        print(f"Input format: {args.input_format}")
     if args.source_type == "generic" and getattr(args, "mapping", None):
         print(f"Using mapping file: {args.mapping}")
     print(f"Showing top {min(len(incidents), args.top)} incident(s)")
@@ -423,6 +410,7 @@ def cmd_generic_explain(args: argparse.Namespace) -> int:
 
     payload = {
         "path": args.path,
+        "source_type": "generic",
         "input_format": args.input_format,
         "mapping": getattr(args, "mapping", None),
         "window_minutes": args.window_minutes,
@@ -435,10 +423,10 @@ def cmd_generic_explain(args: argparse.Namespace) -> int:
         payload["ai_analysis"] = ai_analysis
 
     if args.format == "json":
-        write_output(json.dumps(payload, indent=2), getattr(args, "output", None))
-        return 0
+        return _write_json_payload(payload, getattr(args, "output", None))
 
     print(f"Explaining generic incident at index {index}: {incident.incident_id}")
+    print(f"Input format: {args.input_format}")
     if getattr(args, "mapping", None):
         print(f"  using_mapping={args.mapping}")
     print(
@@ -558,13 +546,14 @@ def cmd_normalized_explain(args: argparse.Namespace) -> int:
         payload["ai_analysis"] = ai_analysis
 
     if args.format == "json":
-        write_output(json.dumps(payload, indent=2), getattr(args, "output", None))
-        return 0
+        return _write_json_payload(payload, getattr(args, "output", None))
 
     print(
         f"Explaining normalized incident at index {index}: {incident.incident_id} "
         f"(source_type={args.source_type})"
     )
+    if args.source_type == "generic":
+        print(f"Input format: {args.input_format}")
     if args.source_type == "generic" and getattr(args, "mapping", None):
         print(f"  using_mapping={args.mapping}")
     print(
@@ -618,7 +607,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="aegislog",
         description=(
-            "Analyze logs, detect anomalous sessions, group SSH incidents, "
+            "Analyze logs, normalize generic/SSH/Apache events, group incidents, "
             "and generate incident explanations."
         ),
         epilog=(
@@ -684,7 +673,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_normalize.add_argument(
         "--output",
-        help="Optional path to write JSON output instead of stdout.",
+        help="Optional path to write output instead of stdout.",
     )
     p_normalize.set_defaults(func=cmd_normalize)
 
@@ -707,7 +696,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_norm_ssh.add_argument(
         "--output",
-        help="Optional path to write JSON output instead of stdout.",
+        help="Optional path to write output instead of stdout.",
     )
     p_norm_ssh.set_defaults(func=cmd_normalize_ssh)
 
@@ -730,7 +719,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_norm_apache.add_argument(
         "--output",
-        help="Optional path to write JSON output instead of stdout.",
+        help="Optional path to write output instead of stdout.",
     )
     p_norm_apache.set_defaults(func=cmd_normalize_apache)
 
@@ -769,7 +758,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_generic_incidents.add_argument(
         "--output",
-        help="Optional path to write JSON output instead of stdout.",
+        help="Optional path to write output instead of stdout.",
     )
     p_generic_incidents.set_defaults(func=cmd_generic_incidents)
 
@@ -814,7 +803,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_norm_inc.add_argument(
         "--output",
-        help="Optional path to write JSON output instead of stdout.",
+        help="Optional path to write output instead of stdout.",
     )
     p_norm_inc.set_defaults(func=cmd_normalized_incidents)
 
@@ -863,7 +852,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_generic_explain.add_argument(
         "--output",
-        help="Optional path to write JSON output instead of stdout.",
+        help="Optional path to write output instead of stdout.",
     )
     p_generic_explain.set_defaults(func=cmd_generic_explain)
 
@@ -918,13 +907,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_norm_explain.add_argument(
         "--output",
-        help="Optional path to write JSON output instead of stdout.",
+        help="Optional path to write output instead of stdout.",
     )
     p_norm_explain.set_defaults(func=cmd_normalized_explain)
 
     p_examples = subparsers.add_parser(
         "examples",
-        help="Show example log_path/log-type/model-path combinations.",
+        help="Show example command combinations.",
     )
     p_examples.set_defaults(func=cmd_examples)
 
@@ -957,11 +946,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    args.func(args)
+
+    result = args.func(args)
+    return int(result) if isinstance(result, int) else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

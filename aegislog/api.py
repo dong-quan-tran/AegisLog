@@ -10,6 +10,7 @@ from aegislog.services_api import (
     generic_incidents,
     normalize_logs,
     normalized_explain,
+    normalized_incidents,
 )
 
 app = FastAPI(
@@ -65,6 +66,23 @@ def post_generic_incidents(request: LogRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Incident grouping failed: {exc}") from exc
+
+
+@app.post("/normalized-incidents")
+def post_normalized_incidents(request: LogRequest) -> dict:
+    try:
+        return normalized_incidents(
+            content=request.content,
+            source_type=request.source_type,
+            input_format=request.input_format,
+            mapping=request.mapping,
+            window_minutes=request.window_minutes,
+            top=request.top,
+        )
+    except (NormalizedLoadError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Normalized incident grouping failed: {exc}") from exc
 
 
 @app.post("/generic-explain")
