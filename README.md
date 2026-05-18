@@ -419,6 +419,31 @@ Planned / in progress:
 
 ***
 
+## Future work
+
+AegisLog is intentionally scoped as a focused MVP. The following improvements are out of scope for this version but are natural next steps:
+
+- **Richer UI workflows**  
+  - Add buttons to load built‑in JSONL/syslog/SSH/Apache samples and automatically set `source_type` / `input_format`.  
+  - Add a mapping editor panel so generic mappings (JSON/YAML) can be created and tested directly from the UI.  
+  - Present explain results in a more human‑friendly layout (headline, key bullets, timeline) instead of raw JSON.
+
+- **Generic grouping and mapping enhancements**  
+  - Support additional grouping strategies (e.g., by source IP only, by user only, by host+service).  
+  - Extend mapping capabilities with simple transforms (lowercasing, trimming, basic extraction) and better handling of multiple candidate source fields.
+
+- **AI backend flexibility**  
+  - Make the AI explain layer pluggable, driven by configuration or environment variables.  
+  - Support multiple backends (local models, external APIs) with clear timeouts and error reporting.
+
+- **Observability and testing**  
+  - Add structured logging and basic metrics for request volumes, incident counts, and AI success/error rates.  
+  - Introduce lightweight frontend tests and, optionally, a multi‑version Python test matrix in CI.
+
+- **Packaging and deployment**  
+  - Package AegisLog as an installable Python project with a CLI entry point.  
+  - Provide Docker images (API + built frontend) and a simple compose file for local or demo deployments.
+
 ## Author
 
 Name: Dong Quan Tran (Johnny)  

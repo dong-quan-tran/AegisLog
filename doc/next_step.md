@@ -1,62 +1,99 @@
-Here’s a focused, realistic TODO list for tomorrow, based on where you are now.
+1. UI polish and usability
+Sample loader buttons
+Add buttons that load:
 
-## 1. Manual backend validation
+A generic JSONL sample and set source_type=generic, input_format=jsonl.
 
-- Hit `/docs` and:
-  - Exercise `/normalize` with:
-    - `source_type=generic`, `input_format=jsonl` (your sample JSONL).
-    - `source_type=generic`, `input_format=syslog` (sample syslog).
-  - Exercise `/normalized-incidents` with the same inputs.
-  - Exercise `/generic-explain` and `/normalized-explain` with `first=true`, `use_ai=false`.
-- Confirm responses match expectations:
-  - Summaries look sane.
-  - Incidents exist and fields like `event_category`, `event_action`, `severity`, `service`, `user` all show up.
-  - Error messages are clear for obviously bad inputs (e.g., empty content).
+A syslog sample and set source_type=generic, input_format=syslog.
 
-## 2. Documentation pass
+Optional SSH/Apache samples.
+This keeps the dropdowns in sync with the textarea content and makes the app self‑demoing.
 
-- Update or create:
-  - `README.md`:
-    - Quickstart (install, run CLI, run API).
-    - Example CLI commands for generic/normalized flows.
-    - Example API requests (JSON bodies) for each endpoint.
-  - `docs/architecture.md`:
-    - Verify it matches the final behavior (mapping schema, endpoints, flows).
-  - Add or refine mapping docs:
-    - Explain `fields` and `defaults` structure.
-    - Show one JSON and one YAML example.
-- Make sure docs clearly separate:
-  - Generic vs normalized flows.
-  - CLI usage vs HTTP API usage.
+Mapping editor
+Add a small JSON/YAML mapping textarea and a toggle:
 
-## 3. CI pipeline
+When enabled, parse the mapping and include it in requests for source_type=generic.
 
-- Add a basic workflow (e.g., GitHub Actions) that:
-  - Sets up Python and installs dependencies.
-  - Runs `python -m pytest`.
-- Ensure it:
-  - Caches dependencies (optional but nice).
-  - Fails the build on any test failure.
+Show validation errors inline if the mapping isn’t valid JSON/YAML.
 
-## 4. Sample data & examples
+Better layout for explain
+Instead of raw JSON pre blocks, add:
 
-- Finalize a small `data/` set:
-  - `data/sample_generic.jsonl`
-  - `data/sample_syslog.log`
-  - `mapping/example_auth_app.yaml`
-- Add a short “Examples” section to the README showing:
-  - One CLI example using `mapping`.
-  - One API example with a `mapping` payload.
-  - One normalized explain example (generic or ssh).
+A concise header (incident title, severity, attack pattern).
 
-## 5. Frontend kickoff
+A bullet list of evidence highlights.
 
-- Create the React app (if not done yet) with Vite.
-- Wire up a minimal UI that calls:
-  - `/normalize`
-  - `/normalized-incidents`
-  - `/normalized-explain`
-- Hard-code a small sample log textarea for now, just to prove end-to-end flow:
-  - Paste sample JSONL.
-  - Click “Group incidents.”
-  - Click an incident to run explain.
+A more readable AI panel (summary at top, bullets for evidence, then caveats/next steps).
+
+2. Backend features
+More robust generic grouping heuristics
+Expand grouping beyond src_ip_user:
+
+Support alternative keys (e.g., src_ip_only, user_only, host_service).
+
+Let the client specify grouping strategy in the request.
+
+Richer mapping options
+Future mapping capabilities:
+
+Simple transforms (lowercasing, trimming, basic regex extract).
+
+Field renaming + coalescing (e.g., src_ip from several possible fields).
+
+Optional “drop” lists for noisy fields that should not go into extra.
+
+Pluggable AI backends
+Make AI explain pluggable:
+
+Environment‑driven choice of model/provider.
+
+A “dry run” mode that returns a stub but keeps the rest of the pipeline real.
+
+Clear rate limiting / timeout behavior.
+
+3. Observability and debugging
+Structured logging
+Add structured logs around:
+
+Incoming requests (source_type, input_format, sizes).
+
+Grouping decisions (number of events, number of incidents).
+
+AI calls (latency, success/failure).
+
+Metrics hooks
+If you ever deploy this, metrics such as:
+
+Request counts per endpoint and status code.
+
+Average events per incident.
+
+AI success vs error counts.
+
+These make it easier to operate AegisLog in a real environment.
+
+4. Test and CI enhancements
+Frontend tests
+Add a minimal set of tests around:
+
+The main app component (rendering default sample).
+
+The API helper error-handling.
+This doesn’t need to be exhaustive, but a smoke test that the UI loads is useful.
+
+Multi‑version Python matrix
+Extend CI to test against multiple Python versions (e.g., 3.10 and 3.11) to catch compatibility issues early if you care about multiple environments.
+
+5. Packaging and distribution
+CLI installability
+Add pyproject.toml or a modern packaging setup so users can:
+
+pip install aegislog and get the CLI entry point directly (e.g., aegislog command).
+
+Docker images
+Optional but nice:
+
+One image for backend API.
+
+One image (or static build) for the frontend.
+That would make local deployment dead simple.

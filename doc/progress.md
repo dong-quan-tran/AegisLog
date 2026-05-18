@@ -2230,3 +2230,116 @@ A stable normalized schema.
 A stable mapping contract.
 
 Stable endpoints ready for a frontend.
+
+Progress log: 05/17/2026
+
+Backend validation and behavior
+Manually exercised the HTTP API via /docs:
+
+Confirmed /normalize works for generic JSONL with realistic login events, returning correct counts and normalized previews.
+
+Confirmed /normalized-incidents groups the three sample events into two coherent incidents with sensible metadata (severity, priority, attack pattern, counts, time range).
+
+Confirmed /generic-explain and /normalized-explain both return rich incident and evidence objects that match the incidents you saw from grouping.
+
+Verified that explain flows behave correctly with use_ai=false and that the normalized explain pipeline mirrors what the generic explain path does semantically.
+
+Documentation and repo hygiene
+Replaced the old architecture.md with a current architecture overview:
+
+Parsers → mapping → normalization → incident grouping → evidence → AI explain.
+
+Separated generic vs source-specific paths and showed how the CLI, API, and service layer connect.
+
+Rewrote the main README.md to match the actual system:
+
+Clean quickstart (venv, install, tests, run API).
+
+CLI examples for generic/normalized flows.
+
+Bring‑your‑own‑logs section with mapping schema, JSON/YAML examples, and concrete commands.
+
+Documented the real HTTP API endpoints and request structure instead of the older “planned” API.
+
+Added a “Web UI (React + Vite)” section so the UI is now first‑class in the docs.
+
+Tightened .gitignore so __pycache__, .pyc files, and your .venv don’t pollute the repo.
+
+CI and automation
+Added a GitHub Actions workflow to:
+
+Check out the code on push/PR.
+
+Set up Python.
+
+Install dependencies via requirements.txt.
+
+Run the full pytest suite.
+
+This gives you automatic test runs on every push/PR instead of relying purely on local runs.
+
+Frontend (AegisLog UI)
+Bootstrapped a React app with Vite (aegislog-ui).
+
+Configured the Vite dev server to proxy /api/* routes to the FastAPI backend on port 8000, so frontend code uses clean /api/... paths instead of hardcoding host/port.
+
+Added a small API helper module to centralize POST JSON calls for:
+
+/normalize
+
+/normalized-incidents
+
+/normalized-explain
+
+Implemented the first AegisLog UI screen:
+
+Log textarea preloaded with a realistic JSONL sample.
+
+Controls for source_type, input_format, window_minutes, top.
+
+Buttons for “Normalize” and “Group incidents”.
+
+Normalization summary panel showing counts from /normalize.
+
+Incident list panel showing results from /normalized-incidents, with clickable rows.
+
+Explain panel showing:
+
+The incident object.
+
+The structured evidence.
+
+Extended the UI to support AI:
+
+Added a “Use AI explanation” checkbox that toggles a use_ai boolean in state.
+
+Wired use_ai into the payload for /normalized-explain.
+
+Added display logic for:
+
+ai_analysis (structured AI output) when available.
+
+ai_error when AI is not configured or fails.
+
+Verified that AI analysis for the generic incident renders clearly (summary, evidence bullets, hypothesis, caveats, next steps).
+
+Version control and structure
+Grouped your final changes into coherent commits:
+
+Docs (README + architecture).
+
+UI (React components, API helper, Vite proxy).
+
+CI + .gitignore.
+
+Ensured project structure is clear:
+
+Backend code at root.
+
+Docs under doc/ (or docs/ depending on how you finalize it).
+
+UI in aegislog-ui/.
+
+CI under .github/workflows/.
+
+Overall, today’s work closed the loop: backend + docs + tests + CI + a working UI that hits real endpoints.
