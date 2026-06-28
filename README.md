@@ -446,7 +446,9 @@ AegisLog is intentionally scoped as a focused MVP. The following improvements ar
 
 ## Author
 
-Name: Dong Quan Tran (Johnny)  
-GitHub: https://github.com/dong-quan-tran
+AegisLog is developed and maintained by:
 
-***
+- **Dong Quan Tran (Johnny)**
+- Role: Owner / Collaborator
+- Email: dxt9721@mavs.uta.edu / dongquan.tran.johnny@gmail.com
+- GitHub: dong-quan-tran
